@@ -2,8 +2,10 @@ class_name Mountain
 extends Node2D
 ## The destructible mountain: a big grid of pixels, each with a material and HP.
 ## Rendered as a single Image/texture that is patched as pixels change.
+## The bottom edge of the grid sits on the ground (node position is its top-left).
+## Digging returns a "harvest" of the pixels that broke off, which the caller
+## turns into rocks (in your hand, on the ground, in a bird's claws...).
 
-signal cell_destroyed(mat: int, world_pos: Vector2, color: Color)
 signal item_found(item_name: String, base_value: float, mat: int, world_pos: Vector2)
 signal cleared
 
@@ -20,6 +22,13 @@ var item_of := PackedInt32Array()   # cell -> item id (0 = none)
 var items: Dictionary = {}          # item id -> {"name", "value", "left"}
 var initial_solid := 0
 var solid := 0
+var top := PackedInt32Array()       # per column: y of the top-most solid pixel (h if none)
+var _harvesting := false
+var _h_n := 0
+var _h_value := 0.0
+var _h_cols := PackedColorArray()
+var _h_pos := PackedVector2Array()
+var _h_vals := PackedFloat32Array()
 
 var _image: Image
 var _texture: ImageTexture
@@ -166,6 +175,9 @@ func _rebuild() -> void:
 		solid += 1
 		hp[i] = _max_hp(m)
 		_image.set_pixel(i % w, i / w, _cell_color(i))
+	top.resize(w)
+	for x in w:
+		_rescan_top(x, 0)
 	initial_solid = maxi(initial_solid, solid) if initial_solid > 0 else solid
 	_cleared = false
 	_texture = ImageTexture.create_from_image(_image)
@@ -178,6 +190,14 @@ func _max_hp(m: int) -> float:
 
 
 # --------------------------------------------------------------- display
+
+## World-space y of the walkable surface at world x (mountain top or ground).
+func surface_y_at(world_x: float) -> float:
+	var x := floori((world_x - global_position.x) / cell_scale)
+	if x < 0 or x >= w:
+		return global_position.y + h * cell_scale
+	return global_position.y + top[x] * cell_scale
+
 
 func set_cell_scale(s: float) -> void:
 	cell_scale = s
@@ -224,11 +244,26 @@ func is_solid(c: Vector2i) -> bool:
 	return in_bounds(c) and mat[c.y * w + c.x] != Materials.AIR
 
 
-## Damages every pixel within `radius` cells of `center`. Returns pixels removed.
-func damage_circle(center: Vector2i, radius: float, dmg: float, falloff := false) -> int:
+func _begin_harvest() -> void:
+	_harvesting = true
+	_h_n = 0
+	_h_value = 0.0
+	_h_cols = PackedColorArray()
+	_h_pos = PackedVector2Array()
+	_h_vals = PackedFloat32Array()
+
+
+func _end_harvest() -> Dictionary:
+	_harvesting = false
+	return {"n": _h_n, "value": _h_value, "colors": _h_cols, "pos": _h_pos, "vals": _h_vals}
+
+
+## Damages every pixel within `radius` cells of `center`.
+## Returns a harvest: {"n", "value", "colors", "pos", "vals"} of the pixels that broke off.
+func damage_circle(center: Vector2i, radius: float, dmg: float, falloff := false) -> Dictionary:
+	_begin_harvest()
 	var r := int(ceil(radius))
 	var r2 := radius * radius
-	var destroyed := 0
 	for dy in range(-r, r + 1):
 		var y := center.y + dy
 		if y < 0 or y >= h:
@@ -243,9 +278,32 @@ func damage_circle(center: Vector2i, radius: float, dmg: float, falloff := false
 			var amount := dmg
 			if falloff:
 				amount = dmg * (1.0 - 0.6 * sqrt(d2) / maxf(radius, 1.0))
-			if _damage(y * w + x, amount):
-				destroyed += 1
-	return destroyed
+			_damage(y * w + x, amount)
+	return _end_harvest()
+
+
+## Damages a rectangle of cells (used by bulldozers).
+func damage_rect(rect: Rect2i, dmg: float) -> Dictionary:
+	_begin_harvest()
+	for y in range(maxi(rect.position.y, 0), mini(rect.end.y, h)):
+		for x in range(maxi(rect.position.x, 0), mini(rect.end.x, w)):
+			_damage(y * w + x, dmg)
+	return _end_harvest()
+
+
+## Removes every pixel in a circle outright, no HP check (the bird).
+func scoop_circle(center: Vector2i, radius: float) -> Dictionary:
+	return damage_circle(center, radius, INF)
+
+
+## Damages the top `depth` pixels of every column (earthquake).
+func damage_surface(depth: int, dmg: float) -> Dictionary:
+	_begin_harvest()
+	for x in w:
+		var y0 := top[x]
+		for y in range(y0, mini(y0 + depth, h)):
+			_damage(y * w + x, dmg)
+	return _end_harvest()
 
 
 func _damage(i: int, amount: float) -> bool:
@@ -267,10 +325,19 @@ func _destroy(i: int) -> void:
 	mat[i] = Materials.AIR
 	hp[i] = 0.0
 	solid -= 1
+	Game.stats["pixels"] = int(Game.stats["pixels"]) + 1
 	_image.set_pixel(c.x, c.y, Color(0, 0, 0, 0))
 	_dirty = true
+	if c.y == top[c.x]:
+		_rescan_top(c.x, c.y)
 	var wp := cell_to_world(c)
-	cell_destroyed.emit(m, wp, col)
+	if _harvesting:
+		var pv := Game.pixel_value(m)
+		_h_n += 1
+		_h_value += pv
+		_h_vals.append(pv)
+		_h_cols.append(col)
+		_h_pos.append(wp)
 	var id := item_of[i]
 	if id != 0:
 		item_of[i] = 0
@@ -285,7 +352,15 @@ func _destroy(i: int) -> void:
 		_finish_clear.call_deferred()
 
 
+func _rescan_top(x: int, from_y: int) -> void:
+	var y := from_y
+	while y < h and mat[y * w + x] == Materials.AIR:
+		y += 1
+	top[x] = y
+
+
 func _finish_clear() -> void:
+	_harvesting = false
 	for i in w * h:
 		if mat[i] != Materials.AIR:
 			_destroy(i)
@@ -310,10 +385,31 @@ func moved_fraction() -> float:
 func random_surface_cell() -> Vector2i:
 	for _attempt in 12:
 		var x := _rng.randi_range(0, w - 1)
-		for y in h:
-			if mat[y * w + x] != Materials.AIR:
-				return Vector2i(x, y)
+		if top[x] < h:
+			return Vector2i(x, top[x])
 	return Vector2i(-1, -1)
+
+
+## Top-most solid pixel near world x (searching outwards), or (-1,-1).
+func surface_cell_near(world_x: float, search := 40) -> Vector2i:
+	var cx := floori((world_x - global_position.x) / cell_scale)
+	for d in search:
+		for x in [cx - d, cx + d]:
+			if x >= 0 and x < w and top[x] < h:
+				return Vector2i(x, top[x])
+	return Vector2i(-1, -1)
+
+
+## Solid pixel nearest to a world point along the line towards `from` (for guns).
+func first_solid_towards(target: Vector2i, from_world: Vector2) -> Vector2i:
+	var start := world_to_cell(from_world)
+	var steps := maxi(absi(target.x - start.x), absi(target.y - start.y))
+	for i in steps + 1:
+		var t := float(i) / maxf(steps, 1.0)
+		var c := Vector2i(roundi(lerpf(start.x, target.x, t)), roundi(lerpf(start.y, target.y, t)))
+		if is_solid(c):
+			return c
+	return target
 
 
 # ------------------------------------------------------------- save / load

@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://c73dbimcn2x80"
-path="res://.godot/imported/dynamite.png-666acdd60692d29a6cd3bacf55a11cbc.ctex"
+uid="uid://yvats1loq0pd"
+path="res://.godot/imported/quake.png-26d102729ce47ffc18fe469226693505.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://assets/sprites/dynamite.png"
-dest_files=["res://.godot/imported/dynamite.png-666acdd60692d29a6cd3bacf55a11cbc.ctex"]
+source_file="res://assets/sprites/quake.png"
+dest_files=["res://.godot/imported/quake.png-26d102729ce47ffc18fe469226693505.ctex"]
 
 [params]
 

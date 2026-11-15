@@ -32,6 +32,28 @@ const DYNAMITE: Array = [
 	"Ha! Love the smell of quarterly progress.",
 ]
 
+const TRUCK: Array = [
+	"Ka-ching! That's MY ka-ching.",
+	"Another truckload! Keep 'em coming.",
+	"Rocks to money. Alchemy, basically.",
+]
+
+const NUKE: Array = [
+	"Was that... legal? Don't answer that.",
+	"I said gone, not GONE gone. ...Actually, that works.",
+	"My ears are ringing with PROFIT.",
+]
+
+const BIRD: Array = [
+	"Is that bird on payroll?",
+	"Good bird. Great bird. Employee of the month.",
+]
+
+const MILITARY: Array = [
+	"I called in a few favours. Don't ask which country.",
+	"More firepower! The mountain won't know what hit it.",
+]
+
 const ITEM: Array = [
 	"A what? Sell it. Sell it immediately.",
 	"Put it in the museum. The museum of SELLING IT.",
