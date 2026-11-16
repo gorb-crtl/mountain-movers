@@ -2,10 +2,16 @@ class_name Mountain
 extends Node2D
 ## The destructible mountain: a big grid of pixels, each with a material and HP.
 ## Rendered as a single Image/texture that is patched as pixels change.
+## The bottom edge of the grid sits on the ground (node position is its top-left).
+## Digging returns a "harvest" of the pixels that broke off, which the caller
+## turns into rocks (in your hand, on the ground, in a bird's claws...).
 
-signal cell_destroyed(mat: int, world_pos: Vector2, color: Color)
 signal item_found(item_name: String, base_value: float, mat: int, world_pos: Vector2)
 signal cleared
+## Unsupported rock is about to give way (cells start shaking).
+signal cave_warning(world_pos: Vector2, cells: int)
+## A cave-in happened: `harvest` is the rock that fell, `center` its middle.
+signal caved_in(harvest: Dictionary, center: Vector2)
 
 ## Once this fraction (or less) of the mountain is left, the rest crumbles.
 const CLEAR_THRESHOLD := 0.005
@@ -20,6 +26,15 @@ var item_of := PackedInt32Array()   # cell -> item id (0 = none)
 var items: Dictionary = {}          # item id -> {"name", "value", "left"}
 var initial_solid := 0
 var solid := 0
+var top := PackedInt32Array()       # per column: y of the top-most solid pixel (h if none)
+var ore_cells := PackedInt32Array()  # where the shiny stuff is (for glints)
+var _flashes: Dictionary = {}         # cell -> seconds left of hit flash
+var _harvesting := false
+var _h_n := 0
+var _h_value := 0.0
+var _h_cols := PackedColorArray()
+var _h_pos := PackedVector2Array()
+var _h_vals := PackedFloat32Array()
 
 var _image: Image
 var _texture: ImageTexture
@@ -27,6 +42,22 @@ var _sprite: Sprite2D
 var _dirty := false
 var _cleared := false
 var _rng := RandomNumberGenerator.new()
+
+# ---- cave-ins ----
+# Every solid pixel has a "support distance": 0 when a straight stack of rock
+# connects it to the ground, otherwise how many pixels sideways it is to rock
+# that is. Overhangs further than MAX_SPAN from support (and anything resting
+# on them, and floating chunks) shake for a moment and then fall.
+const MAX_SPAN := 7
+const UNSUPPORTED := 255
+const CAVE_DELAY := 0.35
+const CAVE_BONUS := 1.5
+var sup := PackedByteArray()
+var _windows: Array[Vector3i] = []   # (x0, x1, lowest row) needing a support recheck
+var _pending: Dictionary = {}        # cell -> true, waiting to fall
+var _pending_t := 0.0
+var _collapsing := false
+var _shake_tick := 0
 
 
 func _init() -> void:
@@ -36,7 +67,25 @@ func _init() -> void:
 	add_child(_sprite)
 
 
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
+	if not _windows.is_empty() and not _cleared:
+		_update_support()
+	if not _pending.is_empty():
+		_pending_t -= delta
+		if _pending_t <= 0.0 or _cleared:
+			_collapse_pending()
+		else:
+			_shake_pending()
+	if not _flashes.is_empty():
+		for i in _flashes.keys():
+			var t: float = _flashes[i] - delta
+			if t <= 0.0:
+				_flashes.erase(i)
+				if mat[i] != Materials.AIR:
+					_image.set_pixel(i % w, i / w, _cell_color(i))
+					_dirty = true
+			else:
+				_flashes[i] = t
 	if _dirty and _texture:
 		_texture.update(_image)
 		_dirty = false
@@ -166,6 +215,20 @@ func _rebuild() -> void:
 		solid += 1
 		hp[i] = _max_hp(m)
 		_image.set_pixel(i % w, i / w, _cell_color(i))
+	top.resize(w)
+	for x in w:
+		_rescan_top(x, 0)
+	sup.resize(n)
+	sup.fill(UNSUPPORTED)
+	_windows.clear()
+	_pending.clear()
+	# Initial support pass never collapses anything (that would be unfair on load).
+	_support_pass(0, w - 1, h - 1, false)
+	ore_cells = PackedInt32Array()
+	for i in n:
+		if mat[i] >= Materials.COPPER:
+			ore_cells.append(i)
+	_flashes.clear()
 	initial_solid = maxi(initial_solid, solid) if initial_solid > 0 else solid
 	_cleared = false
 	_texture = ImageTexture.create_from_image(_image)
@@ -178,6 +241,14 @@ func _max_hp(m: int) -> float:
 
 
 # --------------------------------------------------------------- display
+
+## World-space y of the walkable surface at world x (mountain top or ground).
+func surface_y_at(world_x: float) -> float:
+	var x := floori((world_x - global_position.x) / cell_scale)
+	if x < 0 or x >= w:
+		return global_position.y + h * cell_scale
+	return global_position.y + top[x] * cell_scale
+
 
 func set_cell_scale(s: float) -> void:
 	cell_scale = s
@@ -208,6 +279,11 @@ func _base_color(i: int) -> Color:
 
 func _cell_color(i: int) -> Color:
 	var c := _base_color(i)
+	# Rim light on exposed top edges makes the silhouette pop on a dark background.
+	if i < w or mat[i - w] == Materials.AIR:
+		c = c.lightened(0.28)
+	elif i >= 2 * w and mat[i - 2 * w] == Materials.AIR:
+		c = c.lightened(0.1)
 	var dmg := 1.0 - hp[i] / _max_hp(mat[i])
 	if dmg > 0.0:
 		c = c.darkened(dmg * 0.55)
@@ -224,11 +300,26 @@ func is_solid(c: Vector2i) -> bool:
 	return in_bounds(c) and mat[c.y * w + c.x] != Materials.AIR
 
 
-## Damages every pixel within `radius` cells of `center`. Returns pixels removed.
-func damage_circle(center: Vector2i, radius: float, dmg: float, falloff := false) -> int:
+func _begin_harvest() -> void:
+	_harvesting = true
+	_h_n = 0
+	_h_value = 0.0
+	_h_cols = PackedColorArray()
+	_h_pos = PackedVector2Array()
+	_h_vals = PackedFloat32Array()
+
+
+func _end_harvest() -> Dictionary:
+	_harvesting = false
+	return {"n": _h_n, "value": _h_value, "colors": _h_cols, "pos": _h_pos, "vals": _h_vals}
+
+
+## Damages every pixel within `radius` cells of `center`.
+## Returns a harvest: {"n", "value", "colors", "pos", "vals"} of the pixels that broke off.
+func damage_circle(center: Vector2i, radius: float, dmg: float, falloff := false) -> Dictionary:
+	_begin_harvest()
 	var r := int(ceil(radius))
 	var r2 := radius * radius
-	var destroyed := 0
 	for dy in range(-r, r + 1):
 		var y := center.y + dy
 		if y < 0 or y >= h:
@@ -243,9 +334,32 @@ func damage_circle(center: Vector2i, radius: float, dmg: float, falloff := false
 			var amount := dmg
 			if falloff:
 				amount = dmg * (1.0 - 0.6 * sqrt(d2) / maxf(radius, 1.0))
-			if _damage(y * w + x, amount):
-				destroyed += 1
-	return destroyed
+			_damage(y * w + x, amount)
+	return _end_harvest()
+
+
+## Damages a rectangle of cells (used by bulldozers).
+func damage_rect(rect: Rect2i, dmg: float) -> Dictionary:
+	_begin_harvest()
+	for y in range(maxi(rect.position.y, 0), mini(rect.end.y, h)):
+		for x in range(maxi(rect.position.x, 0), mini(rect.end.x, w)):
+			_damage(y * w + x, dmg)
+	return _end_harvest()
+
+
+## Removes every pixel in a circle outright, no HP check (the bird).
+func scoop_circle(center: Vector2i, radius: float) -> Dictionary:
+	return damage_circle(center, radius, INF)
+
+
+## Damages the top `depth` pixels of every column (earthquake).
+func damage_surface(depth: int, dmg: float) -> Dictionary:
+	_begin_harvest()
+	for x in w:
+		var y0 := top[x]
+		for y in range(y0, mini(y0 + depth, h)):
+			_damage(y * w + x, dmg)
+	return _end_harvest()
 
 
 func _damage(i: int, amount: float) -> bool:
@@ -253,7 +367,9 @@ func _damage(i: int, amount: float) -> bool:
 		return false
 	hp[i] -= amount
 	if hp[i] > 0.0:
-		_image.set_pixel(i % w, i / w, _cell_color(i))
+		# Hit flash: the pixel blinks bright, then settles to its cracked colour.
+		_image.set_pixel(i % w, i / w, _cell_color(i).lerp(Color(1, 0.95, 0.85), 0.75))
+		_flashes[i] = 0.07
 		_dirty = true
 		return false
 	_destroy(i)
@@ -266,11 +382,28 @@ func _destroy(i: int) -> void:
 	var c := Vector2i(i % w, i / w)
 	mat[i] = Materials.AIR
 	hp[i] = 0.0
+	sup[i] = UNSUPPORTED
 	solid -= 1
+	if not _collapsing and not _cleared:
+		_mark_support(c)
+	_pending.erase(i)
+	Game.stats["pixels"] = int(Game.stats["pixels"]) + 1
 	_image.set_pixel(c.x, c.y, Color(0, 0, 0, 0))
 	_dirty = true
+	if c.y == top[c.x]:
+		_rescan_top(c.x, c.y)
+	_flashes.erase(i)
+	for below in [i + w, i + 2 * w]:
+		if below < w * h and mat[below] != Materials.AIR and not _flashes.has(below):
+			_image.set_pixel(below % w, below / w, _cell_color(below))
 	var wp := cell_to_world(c)
-	cell_destroyed.emit(m, wp, col)
+	if _harvesting:
+		var pv := Game.pixel_value(m)
+		_h_n += 1
+		_h_value += pv
+		_h_vals.append(pv)
+		_h_cols.append(col)
+		_h_pos.append(wp)
 	var id := item_of[i]
 	if id != 0:
 		item_of[i] = 0
@@ -285,7 +418,149 @@ func _destroy(i: int) -> void:
 		_finish_clear.call_deferred()
 
 
+# ------------------------------------------------------------ cave-ins
+
+func _mark_support(c: Vector2i) -> void:
+	var x0 := maxi(0, c.x - MAX_SPAN - 2)
+	var x1 := mini(w - 1, c.x + MAX_SPAN + 2)
+	# Grow the most recent window when this hit is next to it (digging streaks).
+	if not _windows.is_empty():
+		var last: Vector3i = _windows[_windows.size() - 1]
+		if x0 <= last.y + 1 and x1 >= last.x - 1:
+			_windows[_windows.size() - 1] = Vector3i(mini(last.x, x0), maxi(last.y, x1), maxi(last.z, c.y))
+			return
+	_windows.append(Vector3i(x0, x1, c.y))
+
+
+func _update_support() -> void:
+	var wins := _windows
+	_windows = []
+	if wins.size() > 16:
+		var u := wins[0]
+		for v in wins:
+			u = Vector3i(mini(u.x, v.x), maxi(u.y, v.y), maxi(u.z, v.z))
+		wins = [u]
+	var before := _pending.size()
+	for v in wins:
+		_support_pass(v.x, v.y, v.z, true)
+	if _pending.size() > before:
+		if before == 0:
+			_pending_t = CAVE_DELAY
+		var sum := Vector2.ZERO
+		var k := 0
+		for i in _pending:
+			sum += Vector2(i % w, i / w)
+			k += 1
+			if k >= 64:
+				break
+		cave_warning.emit(cell_to_world(Vector2i(sum / float(k))), _pending.size())
+
+
+## Recomputes support for columns x0..x1 from row y_bottom upwards.
+## Rows below y_bottom can't have changed, so they're trusted as-is.
+func _support_pass(x0: int, x1: int, y_bottom: int, collapse: bool) -> void:
+	var min_top := h
+	for x in range(x0, x1 + 1):
+		min_top = mini(min_top, top[x])
+	for y in range(mini(y_bottom, h - 1), min_top - 1, -1):
+		var row := y * w
+		# From below: resting on supported rock inherits its support.
+		for x in range(x0, x1 + 1):
+			var i := row + x
+			if mat[i] == Materials.AIR:
+				sup[i] = UNSUPPORTED
+			elif y == h - 1:
+				sup[i] = 0
+			else:
+				sup[i] = sup[i + w] if mat[i + w] != Materials.AIR and not _pending.has(i + w) else UNSUPPORTED
+		# Sideways: hanging off a neighbour costs one per pixel.
+		var prev := UNSUPPORTED
+		if x0 > 0 and mat[row + x0 - 1] != Materials.AIR:
+			prev = sup[row + x0 - 1]
+		for x in range(x0, x1 + 1):
+			var i := row + x
+			if mat[i] == Materials.AIR:
+				prev = UNSUPPORTED
+				continue
+			if prev + 1 < sup[i]:
+				sup[i] = prev + 1
+			prev = sup[i]
+		prev = UNSUPPORTED
+		if x1 < w - 1 and mat[row + x1 + 1] != Materials.AIR:
+			prev = sup[row + x1 + 1]
+		for x in range(x1, x0 - 1, -1):
+			var i := row + x
+			if mat[i] == Materials.AIR:
+				prev = UNSUPPORTED
+				continue
+			if prev + 1 < sup[i]:
+				sup[i] = prev + 1
+			prev = sup[i]
+		for x in range(x0, x1 + 1):
+			var i := row + x
+			if mat[i] == Materials.AIR:
+				continue
+			if sup[i] > MAX_SPAN:
+				if collapse:
+					_pending[i] = true
+					sup[i] = UNSUPPORTED
+				else:
+					sup[i] = MAX_SPAN
+
+
+func _shake_pending() -> void:
+	_shake_tick += 1
+	var bright := _shake_tick % 4 < 2
+	for i in _pending:
+		var c := _cell_color(i)
+		_image.set_pixel(i % w, i / w, c.lerp(Color(1, 0.9, 0.7), 0.35) if bright else c.darkened(0.25))
+	_dirty = true
+
+
+func _collapse_pending() -> void:
+	var cells := _pending.keys()
+	_pending.clear()
+	_begin_harvest()
+	_collapsing = true
+	for i in cells:
+		if mat[i] != Materials.AIR:
+			_destroy(i)
+	_collapsing = false
+	var hv := _end_harvest()
+	if int(hv["n"]) == 0:
+		return
+	var vals: PackedFloat32Array = hv["vals"]
+	var total := 0.0
+	for k in vals.size():
+		vals[k] *= CAVE_BONUS
+		total += vals[k]
+	hv["vals"] = vals
+	hv["value"] = total
+	var pos: PackedVector2Array = hv["pos"]
+	var sum := Vector2.ZERO
+	for q in pos:
+		sum += q
+	Game.stats["caveins"] = int(Game.stats.get("caveins", 0)) + 1
+	caved_in.emit(hv, sum / float(pos.size()))
+
+
+func _rescan_top(x: int, from_y: int) -> void:
+	var y := from_y
+	while y < h and mat[y * w + x] == Materials.AIR:
+		y += 1
+	top[x] = y
+
+
+## A random still-buried ore/find pixel (for glints), or -1.
+func random_ore_cell() -> int:
+	if ore_cells.is_empty():
+		return -1
+	var i := ore_cells[_rng.randi() % ore_cells.size()]
+	return i if mat[i] >= Materials.COPPER else -1
+
+
 func _finish_clear() -> void:
+	_harvesting = false
 	for i in w * h:
 		if mat[i] != Materials.AIR:
 			_destroy(i)
@@ -310,10 +585,31 @@ func moved_fraction() -> float:
 func random_surface_cell() -> Vector2i:
 	for _attempt in 12:
 		var x := _rng.randi_range(0, w - 1)
-		for y in h:
-			if mat[y * w + x] != Materials.AIR:
-				return Vector2i(x, y)
+		if top[x] < h:
+			return Vector2i(x, top[x])
 	return Vector2i(-1, -1)
+
+
+## Top-most solid pixel near world x (searching outwards), or (-1,-1).
+func surface_cell_near(world_x: float, search := 40) -> Vector2i:
+	var cx := floori((world_x - global_position.x) / cell_scale)
+	for d in search:
+		for x in [cx - d, cx + d]:
+			if x >= 0 and x < w and top[x] < h:
+				return Vector2i(x, top[x])
+	return Vector2i(-1, -1)
+
+
+## Solid pixel nearest to a world point along the line towards `from` (for guns).
+func first_solid_towards(target: Vector2i, from_world: Vector2) -> Vector2i:
+	var start := world_to_cell(from_world)
+	var steps := maxi(absi(target.x - start.x), absi(target.y - start.y))
+	for i in steps + 1:
+		var t := float(i) / maxf(steps, 1.0)
+		var c := Vector2i(roundi(lerpf(start.x, target.x, t)), roundi(lerpf(start.y, target.y, t)))
+		if is_solid(c):
+			return c
+	return target
 
 
 # ------------------------------------------------------------- save / load
