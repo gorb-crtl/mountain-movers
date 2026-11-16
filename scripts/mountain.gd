@@ -8,6 +8,10 @@ extends Node2D
 
 signal item_found(item_name: String, base_value: float, mat: int, world_pos: Vector2)
 signal cleared
+## Unsupported rock is about to give way (cells start shaking).
+signal cave_warning(world_pos: Vector2, cells: int)
+## A cave-in happened: `harvest` is the rock that fell, `center` its middle.
+signal caved_in(harvest: Dictionary, center: Vector2)
 
 ## Once this fraction (or less) of the mountain is left, the rest crumbles.
 const CLEAR_THRESHOLD := 0.005
@@ -39,6 +43,22 @@ var _dirty := false
 var _cleared := false
 var _rng := RandomNumberGenerator.new()
 
+# ---- cave-ins ----
+# Every solid pixel has a "support distance": 0 when a straight stack of rock
+# connects it to the ground, otherwise how many pixels sideways it is to rock
+# that is. Overhangs further than MAX_SPAN from support (and anything resting
+# on them, and floating chunks) shake for a moment and then fall.
+const MAX_SPAN := 7
+const UNSUPPORTED := 255
+const CAVE_DELAY := 0.35
+const CAVE_BONUS := 1.5
+var sup := PackedByteArray()
+var _windows: Array[Vector3i] = []   # (x0, x1, lowest row) needing a support recheck
+var _pending: Dictionary = {}        # cell -> true, waiting to fall
+var _pending_t := 0.0
+var _collapsing := false
+var _shake_tick := 0
+
 
 func _init() -> void:
 	_sprite = Sprite2D.new()
@@ -48,6 +68,14 @@ func _init() -> void:
 
 
 func _process(delta: float) -> void:
+	if not _windows.is_empty() and not _cleared:
+		_update_support()
+	if not _pending.is_empty():
+		_pending_t -= delta
+		if _pending_t <= 0.0 or _cleared:
+			_collapse_pending()
+		else:
+			_shake_pending()
 	if not _flashes.is_empty():
 		for i in _flashes.keys():
 			var t: float = _flashes[i] - delta
@@ -190,6 +218,12 @@ func _rebuild() -> void:
 	top.resize(w)
 	for x in w:
 		_rescan_top(x, 0)
+	sup.resize(n)
+	sup.fill(UNSUPPORTED)
+	_windows.clear()
+	_pending.clear()
+	# Initial support pass never collapses anything (that would be unfair on load).
+	_support_pass(0, w - 1, h - 1, false)
 	ore_cells = PackedInt32Array()
 	for i in n:
 		if mat[i] >= Materials.COPPER:
@@ -348,7 +382,11 @@ func _destroy(i: int) -> void:
 	var c := Vector2i(i % w, i / w)
 	mat[i] = Materials.AIR
 	hp[i] = 0.0
+	sup[i] = UNSUPPORTED
 	solid -= 1
+	if not _collapsing and not _cleared:
+		_mark_support(c)
+	_pending.erase(i)
 	Game.stats["pixels"] = int(Game.stats["pixels"]) + 1
 	_image.set_pixel(c.x, c.y, Color(0, 0, 0, 0))
 	_dirty = true
@@ -378,6 +416,132 @@ func _destroy(i: int) -> void:
 	if not _cleared and solid <= int(initial_solid * CLEAR_THRESHOLD):
 		_cleared = true
 		_finish_clear.call_deferred()
+
+
+# ------------------------------------------------------------ cave-ins
+
+func _mark_support(c: Vector2i) -> void:
+	var x0 := maxi(0, c.x - MAX_SPAN - 2)
+	var x1 := mini(w - 1, c.x + MAX_SPAN + 2)
+	# Grow the most recent window when this hit is next to it (digging streaks).
+	if not _windows.is_empty():
+		var last: Vector3i = _windows[_windows.size() - 1]
+		if x0 <= last.y + 1 and x1 >= last.x - 1:
+			_windows[_windows.size() - 1] = Vector3i(mini(last.x, x0), maxi(last.y, x1), maxi(last.z, c.y))
+			return
+	_windows.append(Vector3i(x0, x1, c.y))
+
+
+func _update_support() -> void:
+	var wins := _windows
+	_windows = []
+	if wins.size() > 16:
+		var u := wins[0]
+		for v in wins:
+			u = Vector3i(mini(u.x, v.x), maxi(u.y, v.y), maxi(u.z, v.z))
+		wins = [u]
+	var before := _pending.size()
+	for v in wins:
+		_support_pass(v.x, v.y, v.z, true)
+	if _pending.size() > before:
+		if before == 0:
+			_pending_t = CAVE_DELAY
+		var sum := Vector2.ZERO
+		var k := 0
+		for i in _pending:
+			sum += Vector2(i % w, i / w)
+			k += 1
+			if k >= 64:
+				break
+		cave_warning.emit(cell_to_world(Vector2i(sum / float(k))), _pending.size())
+
+
+## Recomputes support for columns x0..x1 from row y_bottom upwards.
+## Rows below y_bottom can't have changed, so they're trusted as-is.
+func _support_pass(x0: int, x1: int, y_bottom: int, collapse: bool) -> void:
+	var min_top := h
+	for x in range(x0, x1 + 1):
+		min_top = mini(min_top, top[x])
+	for y in range(mini(y_bottom, h - 1), min_top - 1, -1):
+		var row := y * w
+		# From below: resting on supported rock inherits its support.
+		for x in range(x0, x1 + 1):
+			var i := row + x
+			if mat[i] == Materials.AIR:
+				sup[i] = UNSUPPORTED
+			elif y == h - 1:
+				sup[i] = 0
+			else:
+				sup[i] = sup[i + w] if mat[i + w] != Materials.AIR and not _pending.has(i + w) else UNSUPPORTED
+		# Sideways: hanging off a neighbour costs one per pixel.
+		var prev := UNSUPPORTED
+		if x0 > 0 and mat[row + x0 - 1] != Materials.AIR:
+			prev = sup[row + x0 - 1]
+		for x in range(x0, x1 + 1):
+			var i := row + x
+			if mat[i] == Materials.AIR:
+				prev = UNSUPPORTED
+				continue
+			if prev + 1 < sup[i]:
+				sup[i] = prev + 1
+			prev = sup[i]
+		prev = UNSUPPORTED
+		if x1 < w - 1 and mat[row + x1 + 1] != Materials.AIR:
+			prev = sup[row + x1 + 1]
+		for x in range(x1, x0 - 1, -1):
+			var i := row + x
+			if mat[i] == Materials.AIR:
+				prev = UNSUPPORTED
+				continue
+			if prev + 1 < sup[i]:
+				sup[i] = prev + 1
+			prev = sup[i]
+		for x in range(x0, x1 + 1):
+			var i := row + x
+			if mat[i] == Materials.AIR:
+				continue
+			if sup[i] > MAX_SPAN:
+				if collapse:
+					_pending[i] = true
+					sup[i] = UNSUPPORTED
+				else:
+					sup[i] = MAX_SPAN
+
+
+func _shake_pending() -> void:
+	_shake_tick += 1
+	var bright := _shake_tick % 4 < 2
+	for i in _pending:
+		var c := _cell_color(i)
+		_image.set_pixel(i % w, i / w, c.lerp(Color(1, 0.9, 0.7), 0.35) if bright else c.darkened(0.25))
+	_dirty = true
+
+
+func _collapse_pending() -> void:
+	var cells := _pending.keys()
+	_pending.clear()
+	_begin_harvest()
+	_collapsing = true
+	for i in cells:
+		if mat[i] != Materials.AIR:
+			_destroy(i)
+	_collapsing = false
+	var hv := _end_harvest()
+	if int(hv["n"]) == 0:
+		return
+	var vals: PackedFloat32Array = hv["vals"]
+	var total := 0.0
+	for k in vals.size():
+		vals[k] *= CAVE_BONUS
+		total += vals[k]
+	hv["vals"] = vals
+	hv["value"] = total
+	var pos: PackedVector2Array = hv["pos"]
+	var sum := Vector2.ZERO
+	for q in pos:
+		sum += q
+	Game.stats["caveins"] = int(Game.stats.get("caveins", 0)) + 1
+	caved_in.emit(hv, sum / float(pos.size()))
 
 
 func _rescan_top(x: int, from_y: int) -> void:

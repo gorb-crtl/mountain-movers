@@ -36,7 +36,8 @@ func use(id: String, at: Vector2) -> bool:
 	return true
 
 
-func _sprite(id: String, at: Vector2, scale_f := 2.0) -> Sprite2D:
+func _sprite(id: String, at: Vector2, _scale_hint := 0.0) -> Sprite2D:
+	var scale_f := Game.CELL
 	var s := Sprite2D.new()
 	s.texture = _textures[id]
 	s.scale = Vector2(scale_f, scale_f)
@@ -81,9 +82,9 @@ func _bird(at: Vector2) -> void:
 			effects.debris(at, Color(0.5, 0.45, 0.4), 4.0)
 		var load_node := RockBlob.new()
 		load_node.colors = (hv["colors"] as PackedColorArray).slice(0, Rock.MAX_DRAW)
-		load_node.radius = clampf(Game.CELL * 0.5 * sqrt(float(hv["n"])), 4.0, 30.0)
-		load_node.position = Vector2(0, 14) / 3.0
-		load_node.scale = Vector2(1, 1) / 3.0
+		load_node.count = int(hv["n"])
+		load_node.position = Vector2(0, 30) / Game.CELL
+		load_node.scale = Vector2(1, 1) / Game.CELL
 		b.add_child(load_node))
 	var drop := Vector2(depot.unload_x(), -140)
 	tw.tween_property(b, "position", drop, 1.3).set_trans(Tween.TRANS_SINE)
@@ -151,7 +152,7 @@ func _nuke(at: Vector2) -> void:
 ## Little drawable pile of rock (for things being carried).
 class RockBlob extends Node2D:
 	var colors := PackedColorArray()
-	var radius := 6.0
+	var count := 9
 
 	func _draw() -> void:
-		Rock.draw_blob(self, Vector2.ZERO, radius, colors)
+		Rock.draw_blob(self, Vector2.ZERO, count, colors, Game.CELL)

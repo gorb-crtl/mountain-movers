@@ -32,7 +32,8 @@ var inventory: Dictionary = {}     # one-use item id -> count
 var won: bool = false
 var intro_done: bool = false
 var volume: float = 0.8
-var stats: Dictionary = {"pixels": 0, "clicks": 0, "finds": 0, "earned": 0.0, "mountains": 0, "trucks": 0}
+var crt := true   # CRT TV overlay on/off
+var stats: Dictionary = {"pixels": 0, "clicks": 0, "finds": 0, "earned": 0.0, "mountains": 0, "trucks": 0, "caveins": 0}
 
 
 func _ready() -> void:
@@ -301,7 +302,7 @@ func wipe() -> void:
 	perm_upgrades = {}
 	won = false
 	intro_done = false
-	stats = {"pixels": 0, "clicks": 0, "finds": 0, "earned": 0.0, "mountains": 0, "trucks": 0}
+	stats = {"pixels": 0, "clicks": 0, "finds": 0, "earned": 0.0, "mountains": 0, "trucks": 0, "caveins": 0}
 	start_run()
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(SAVE_PATH))
 
@@ -326,6 +327,7 @@ func save_game(world: Dictionary) -> void:
 		"won": won,
 		"intro_done": intro_done,
 		"volume": volume,
+		"crt": crt,
 		"stats": stats,
 		"world": world,
 	}
@@ -360,6 +362,7 @@ func load_game() -> Dictionary:
 	won = bool(d.get("won", false))
 	intro_done = bool(d.get("intro_done", false))
 	volume = float(d.get("volume", 0.8))
+	crt = bool(d.get("crt", true))
 	var saved_stats: Dictionary = d.get("stats", {})
 	for k in saved_stats:
 		stats[k] = saved_stats[k]

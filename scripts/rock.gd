@@ -4,7 +4,8 @@ extends RigidBody2D
 ## Fossils and artefacts are special rocks with a find_name.
 
 const MAX_DRAW := 49
-const MAX_RADIUS := 26.0
+## Biggest rock, in mountain pixels per side.
+const MAX_SIDE := 10
 
 var pixels := 0
 var value := 0.0
@@ -23,6 +24,7 @@ func _init() -> void:
 	collision_layer = 2
 	collision_mask = 1 | 2
 	gravity_scale = 1.0
+	lock_rotation = true   # pixels stay on the grid
 	can_sleep = true
 	continuous_cd = RigidBody2D.CCD_MODE_CAST_SHAPE
 	physics_material_override = PhysicsMaterial.new()
@@ -83,35 +85,48 @@ func take(n: int) -> Dictionary:
 
 
 func _refresh() -> void:
-	var cell := Game.CELL
-	radius = clampf(cell * 0.55 * sqrt(float(maxi(pixels, 1))), cell * 0.5, MAX_RADIUS)
+	radius = side(pixels) * Game.CELL * 0.5
 	if find_name != "":
-		radius = maxf(radius, cell * 1.6)
+		radius = maxf(radius, Game.CELL * 1.5)
 	_shape.radius = radius
 	mass = 0.2 + pixels * 0.05
 	queue_redraw()
 
 
+## How many mountain pixels across a rock of n pixels is drawn.
+static func side(n: int) -> int:
+	return clampi(int(ceil(sqrt(float(maxi(n, 1))))), 1, MAX_SIDE)
+
+
+func _process(_delta: float) -> void:
+	if not sleeping:
+		queue_redraw()
+
+
 func _draw() -> void:
-	draw_blob(self, Vector2.ZERO, radius, colors, find_name != "")
+	# Snap to the mountain's pixel grid so rocks look like loose mountain pixels.
+	var snapped_pos := (global_position / Game.CELL).round() * Game.CELL
+	draw_blob(self, snapped_pos - global_position, pixels, colors, Game.CELL, find_name != "")
 
 
-## Shared drawing for rocks, the hand and carried loads.
-static func draw_blob(ci: CanvasItem, center: Vector2, r: float, cols: PackedColorArray, is_find := false) -> void:
-	if cols.is_empty():
+## Shared drawing for rocks, the hand and carried loads: a square-ish clump of
+## `count` pixels, `cell` units each, centred on `center`.
+static func draw_blob(ci: CanvasItem, center: Vector2, count: int, cols: PackedColorArray, cell: float, is_find := false) -> void:
+	if cols.is_empty() or count <= 0:
 		return
-	var k := int(ceil(sqrt(float(cols.size()))))
-	var s := (r * 2.0) / float(k)
-	var origin := center - Vector2(r, r)
+	var k := side(count)
+	var drawn := mini(count, k * k)
+	var origin := center - Vector2(k, k) * cell * 0.5
 	if is_find:
-		ci.draw_circle(center, r + 3.0, Color(1, 0.9, 0.3, 0.55))
+		ci.draw_rect(Rect2(origin - Vector2(cell, cell), Vector2(k + 2, k + 2) * cell), Color(1, 0.85, 0.35, 0.35))
 	var i := 0
-	for y in k:
+	# Fill bottom-up so partial clumps sit flat.
+	for y in range(k - 1, -1, -1):
 		for x in k:
-			if i >= cols.size():
-				break
-			# Skip the corners so bigger rocks look rounder.
-			if k >= 3 and ((x == 0 or x == k - 1) and (y == 0 or y == k - 1)):
+			if i >= drawn:
+				return
+			# Knock the top corners off bigger clumps so they look like rocks.
+			if k >= 3 and y == 0 and (x == 0 or x == k - 1):
 				continue
-			ci.draw_rect(Rect2(origin + Vector2(x, y) * s, Vector2(s + 0.5, s + 0.5)), cols[i])
+			ci.draw_rect(Rect2(origin + Vector2(x, y) * cell, Vector2(cell, cell)), cols[i % cols.size()])
 			i += 1

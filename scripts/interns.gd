@@ -173,42 +173,50 @@ func reset() -> void:
 	_crew.clear()
 
 
+# Tiny pixel people, one art pixel = one mountain pixel. h = hard hat, o = body.
+const FRAMES := {
+	"walk_a": [".h.", ".o.", "ooo", ".o.", "o.o", "o.o"],
+	"walk_b": [".h.", ".o.", "ooo", ".o.", ".o.", ".o."],
+	"stand": [".h.", ".o.", "ooo", ".o.", ".o.", "o.o"],
+	"carry_a": ["oho", "ooo", ".o.", ".o.", "o.o", "o.o"],
+	"carry_b": ["oho", "ooo", ".o.", ".o.", ".o.", ".o."],
+	"dig_a": [".h..", ".o.p", ".oo.", ".o..", ".o..", "o.o."],
+	"dig_b": [".h.p", ".oop", ".o..", ".o..", ".o..", "o.o."],
+}
+const BODY := Color(0.88, 0.85, 0.78)
+const HAT := Color(0.95, 0.68, 0.22)
+const PICK := Color(0.6, 0.62, 0.7)
+
+
 func _draw() -> void:
-	var line_c := Color(0.88, 0.85, 0.78)
+	var c := Game.CELL
 	for it in _crew:
 		var x: float = it["x"]
-		var base := Vector2(x, _ground_y(x))
 		var a: float = it["anim"]
 		var dir: float = it["dir"]
-		var walking: bool = it["state"] in ["to_rock", "to_dig", "to_truck"]
-		var swing := sin(a) * 4.0 if walking else 0.0
-		var hip := base + Vector2(0, -6)
-		var neck := base + Vector2(0, -12)
-		var head := base + Vector2(0, -HEIGHT + 1.5)
-		# Legs.
-		draw_line(hip, base + Vector2(swing, 0), line_c, 1.5)
-		draw_line(hip, base + Vector2(-swing, 0), line_c, 1.5)
-		# Body and head.
-		draw_line(hip, neck, line_c, 1.5)
-		draw_circle(head, 2.6, line_c)
-		# Hard hat.
-		draw_rect(Rect2(head + Vector2(-3.2, -3.4), Vector2(6.4, 2.0)), Color(0.95, 0.7, 0.25))
-		var shoulder := neck + Vector2(0, 1)
-		if int(it["n"]) > 0:
-			# Arms up, carrying the load overhead.
-			var load_c := head + Vector2(0, -8)
-			draw_line(shoulder, load_c + Vector2(-3, 2), line_c, 1.2)
-			draw_line(shoulder, load_c + Vector2(3, 2), line_c, 1.2)
-			var r := clampf(2.0 + sqrt(float(it["n"])) * 0.6, 2.5, 7.0)
-			Rock.draw_blob(self, load_c + Vector2(0, -r * 0.5), r, it["cols"])
-		elif it["state"] == "digging":
-			# Pickaxe swing.
-			var ang := -PI * 0.5 + sin(a) * 1.1
-			var hand := shoulder + Vector2.from_angle(ang if dir > 0 else PI - ang) * 6.0
-			draw_line(shoulder, hand, line_c, 1.2)
-			var head_dir := (hand - shoulder).normalized()
-			draw_line(hand, hand + head_dir.orthogonal() * 3.0 * dir, Color(0.55, 0.55, 0.6), 1.5)
-			draw_line(shoulder, shoulder + Vector2(-2 * dir, 4), line_c, 1.2)
-		else:
-			draw_line(shoulder, shoulder + Vector2(-swing * 0.8, 5), line_c, 1.2)
-			draw_line(shoulder, shoulder + Vector2(swing * 0.8, 5), line_c, 1.2)
+		var carrying := int(it["n"]) > 0
+		var frame := "stand"
+		match it["state"]:
+			"to_rock", "to_dig", "to_truck":
+				frame = ("carry_" if carrying else "walk_") + ("a" if fmod(a, TAU) < PI else "b")
+			"digging":
+				frame = "dig_a" if fmod(a, TAU) < PI else "dig_b"
+			_:
+				frame = "carry_a" if carrying else "stand"
+		var rows: Array = FRAMES[frame]
+		var h := rows.size()
+		# Feet on the ground, everything snapped to the mountain's pixel grid.
+		var base := Vector2(roundf(x / c) * c, roundf(_ground_y(x) / c) * c)
+		var top_left := base - Vector2(1.5 * c, h * c)
+		for ry in h:
+			var row: String = rows[ry]
+			for rx in row.length():
+				var ch := row[rx]
+				if ch == ".":
+					continue
+				var col := BODY if ch == "o" else (HAT if ch == "h" else PICK)
+				var px := rx if dir >= 0 else (2 - rx)
+				draw_rect(Rect2(top_left + Vector2(px, ry) * c, Vector2(c, c)), col)
+		if carrying:
+			var n := mini(int(it["n"]), 9)
+			Rock.draw_blob(self, top_left + Vector2(1.5 * c, -1.5 * c), n, it["cols"], c)

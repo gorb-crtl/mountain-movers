@@ -83,7 +83,8 @@ func _add(at: Vector2, vel: Vector2, life: float, color: Color, size: float, gra
 	_vel.append(vel)
 	_life.append(life)
 	_col.append(color)
-	_size.append(maxf(2.0, size))
+	# Everything is built from mountain-sized pixels.
+	_size.append(maxf(1.0, roundf(size / Game.CELL)) * Game.CELL)
 	_gravity.append(grav)
 
 
@@ -120,6 +121,34 @@ func _process(delta: float) -> void:
 	queue_redraw()
 
 
+## A filled circle made of mountain-sized pixels.
+func _pixel_disc(center: Vector2, radius: float, c: Color) -> void:
+	var cell := Game.CELL
+	var cc := (center / cell).round()
+	var r := int(ceil(radius / cell))
+	var r2 := (radius / cell) * (radius / cell)
+	for dy in range(-r, r + 1):
+		# One rect per row keeps this cheap even for a nuke.
+		var half := sqrt(maxf(0.0, r2 - dy * dy))
+		var span := int(floor(half))
+		if span <= 0 and dy * dy > r2:
+			continue
+		draw_rect(Rect2((cc + Vector2(-span, dy)) * cell - Vector2(cell, cell) * 0.5, Vector2(span * 2 + 1, 1) * cell), c)
+
+
+## A circle outline made of mountain-sized pixels.
+func _pixel_ring(center: Vector2, radius: float, c: Color) -> void:
+	var cell := Game.CELL
+	var cc := (center / cell).round()
+	var steps := maxi(8, int(radius / cell * 6.0))
+	var last := Vector2(INF, INF)
+	for i in steps:
+		var p := (cc + Vector2.from_angle(TAU * i / steps) * radius / cell).round()
+		if p != last:
+			draw_rect(Rect2(p * cell - Vector2(cell, cell) * 0.5, Vector2(cell, cell)), c)
+			last = p
+
+
 func _zoom() -> float:
 	return maxf(get_viewport().get_canvas_transform().get_scale().x, 0.01)
 
@@ -141,18 +170,20 @@ func _remove(i: int) -> void:
 
 
 func _draw() -> void:
+	var cell := Game.CELL
 	for f in _flashes:
 		var t: float = f[2] / f[3]
 		var c: Color = f[4]
 		c.a = t * 0.85
-		draw_circle(f[0], f[1] * (1.4 - 0.4 * t), c)
+		_pixel_disc(f[0], f[1] * (1.4 - 0.4 * t), c)
 	for i in _pos.size():
 		var s := _size[i]
 		var c := _col[i]
 		if _gravity[i] < 0.0:
 			c.a *= clampf(_life[i], 0.0, 1.0)
-			s *= 1.0 + (1.6 - _life[i]) * 0.6
-		draw_rect(Rect2(_pos[i] - Vector2(s, s) * 0.5, Vector2(s, s)), c)
+			s = roundf(s * (1.0 + (1.6 - _life[i]) * 0.6) / cell) * cell
+		var p := (_pos[i] / cell).round() * cell
+		draw_rect(Rect2(p - Vector2(s, s) * 0.5, Vector2(s, s)), c)
 	for t in _tracers:
 		draw_line(t[0], t[1], t[3], 1.5)
 	var inv := 1.0 / _zoom()
@@ -160,15 +191,16 @@ func _draw() -> void:
 		var t: float = 1.0 - r[2] / r[3]
 		var c: Color = r[4]
 		c.a *= 1.0 - t
-		draw_arc(r[0], (r[1] as float) * (0.4 + 0.8 * t), 0, TAU, 24, c, 1.5 * inv)
+		_pixel_ring(r[0], (r[1] as float) * (0.4 + 0.8 * t), c)
 	for sp in _sparkles:
 		var t: float = sp[1] / 0.5
 		var c: Color = sp[2]
 		c.a = sin(t * PI)
-		var l := (1.0 + 3.0 * sin(t * PI)) * inv * 1.5
-		var p: Vector2 = sp[0]
-		draw_line(p - Vector2(l, 0), p + Vector2(l, 0), c, inv * 1.2)
-		draw_line(p - Vector2(0, l), p + Vector2(0, l), c, inv * 1.2)
+		var p: Vector2 = ((sp[0] as Vector2) / cell).round() * cell - Vector2(cell, cell) * 0.5
+		draw_rect(Rect2(p, Vector2(cell, cell)), c)
+		if t > 0.3 and t < 0.7:
+			for d in [Vector2(1, 0), Vector2(-1, 0), Vector2(0, 1), Vector2(0, -1)]:
+				draw_rect(Rect2(p + d * cell, Vector2(cell, cell)), Color(c, c.a * 0.5))
 	for p in _pops:
 		var t: float = p[3] / p[4]
 		var c: Color = p[2]

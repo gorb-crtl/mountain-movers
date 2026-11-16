@@ -36,6 +36,8 @@ def new():
 def from_sprite(name):
     """Fits an existing sprite into a 16x16 icon."""
     src = Image.open(SPRITES / name).convert("RGBA")
+    if name == "boss.png":
+        src = src.crop((0, 0, 20, 24))
     bbox = src.getbbox()
     src = src.crop(bbox)
     scale = min(16 / src.width, 16 / src.height)

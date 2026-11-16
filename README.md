@@ -26,17 +26,19 @@ The boss wants the mountain gone. You get paid by the truckload.
 | Input | What it does |
 | --- | --- |
 | Left click the mountain | Break off rock into your hand (hold to keep digging) |
-| Drag to the truck and let go | Load it into the truck |
-| Drag and fling | Throw it (rocks that land in the truck bed get loaded) |
+| Drag to the truck bed and let go | Load it into the truck (letting go anywhere else keeps it in your hand) |
 | Left click a loose rock | Pick it up |
-| Right click | Drop what you're holding |
+| Right click | Drop what you're holding (flick the mouse as you right-click to throw it) |
 | 1-5, then click | Use a one-use item (grenade, large bird, earthquake, airstrike, nuke) |
 | WASD / arrows / right-drag | Move the camera |
 | Mouse wheel | Zoom |
 | F | Re-centre on the mountain |
 | Esc | Cancel an item |
 | Tab (or the arrow tab) | Hide / show the shop panel |
+| F2 | CRT TV effect on / off (also in the Boss tab) |
 
+- **Cave-ins.** Rock only holds up so far past its support (7 pixels of overhang). Dig under the mountain and the unsupported slab shakes for a moment, then comes down as loose rock worth **50% more**. Tunnel under the peak for a MASSIVE CAVE-IN.
+- **The boss** wanders off and comes back to check on you. While he's out, he sometimes just pokes his head in from the side of the screen to say something.
 - **Dump trucks** are the only income. A truck parks at the loading spot; when it's full it honks, drives off, sells the load and comes back. Ore makes rock worth more, and buried **fossils and artefacts** (Ancient Toaster, Cursed Spork, ...) pop out as glowing finds worth a lot. **Send truck** sends a half-full one.
 - **Crew** tab: stronger hands, bigger gloves, wider fistful, **interns** (stick people who dig and haul rock to the truck on their own), wheelbarrows, coffee, bigger truck beds, faster trucks, more trucks, appraiser.
 - **Military** tab: soldiers, machine gunners, a .50 BMG pickup, tanks and bulldozers, set up on the far side of the mountain. Plus weapon upgrades. They knock rock loose; somebody still has to haul it.
@@ -65,7 +67,7 @@ scripts/
   game_state.gd             Autoload "Game": money, upgrades, prestige, save/load, stat formulas
   sfx.gd                    Autoload "Sfx": plays assets/sounds/*.wav
   main.gd                   Input, hand, mountain-cleared flow, autosave, wiring
-  mountain.gd               The destructible pixel mountain (generation, damage, rendering)
+  mountain.gd               The destructible pixel mountain (generation, damage, cave-ins, rendering)
   rock.gd / rock_manager.gd Loose physics rocks (spawn, merge, pick up, save)
   hand.gd                   What you're holding
   truck_depot.gd            Dump truck fleet: loading, driving off, selling
@@ -74,7 +76,8 @@ scripts/
   abilities.gd              One-use items
   camera_rig.gd             Pan / zoom camera
   effects.gd                Debris, tracers, explosions, smoke
-  boss.gd                   The boss and his speech bubble
+  boss.gd                   The boss: walks off, comes back, peeks his head in
+  crt.gd                    CRT TV overlay (shader in shaders/crt.gdshader)
   sky.gd / background.gd    Placeholder sky and ground
   ui/hud.gd                 Top bar, collapsible shop panel, hotbar, popups
   ui/theme_builder.gd       Dark UI theme (colours, fonts, styles)
@@ -93,20 +96,22 @@ tests/smoke_test.tscn       Headless test: hand, trucks, interns, military, item
 
 Overwrite any file in `assets/sprites/` or `assets/sounds/` with one of the same name and the game uses it.
 
-| Sprite | Used for | Drawn at |
+**Pixel rule:** one art pixel = one mountain pixel. Every world sprite is drawn at 5× (`Game.CELL`), so the truck, army, interns, rocks and mountain all share the same chunky grid. Keep new art at the sizes below.
+
+| Sprite | Used for | Size (art pixels) |
 | --- | --- | --- |
-| `boss.png` | The boss (20×24) | 4× |
-| `truck.png` | Dump truck (48×25, bed is x 16-47) | 2× |
-| `soldier.png`, `gunner.png` | Troops (14×16) | 2× |
-| `technical.png`, `tank.png`, `bulldozer.png` | Vehicles | 2× |
-| `bird.png` | Large bird | 3× |
-| `grenade.png`, `nuke.png`, `quake.png`, `airstrike.png` | Items and hotbar icons | 2-3× |
-| `cursor_hand.png` | Your hand | 1× |
-| `icon.png` | Window / app icon | — |
+| `boss.png` | The boss: 3 frames side by side (idle, walk 1, walk 2), each 20×24. The top 10 rows are used for the head peek | 60×24 |
+| `truck.png` | Dump truck (bed is x 9-20) | 22×11 |
+| `soldier.png`, `gunner.png` | Troops | 5×8, 6×8 |
+| `technical.png`, `tank.png`, `bulldozer.png` | Vehicles | 17×10, 18×8, 15×9 |
+| `bird.png` | Large bird | 11×6 |
+| `grenade.png`, `nuke.png`, `quake.png`, `airstrike.png` | Items | 3×4, 5×8, 10×5, 12×5 |
+| `cursor_hand.png`, `cursor_fist.png` | Your hand (open / holding something) | 8×8 |
+| `icon.png` | Window / app icon | any |
 
 Upgrade icons live in `assets/icons/<upgrade id>.png` (16×16 placeholders from `tools/gen_icons.py`; any size works). Fonts are Silkscreen and Pixelify Sans (`assets/fonts/`, SIL Open Font License). UI colours are in `scripts/ui/theme_builder.gd`.
 
-Interns are drawn in code (`interns.gd`, `_draw`) as stick figures. Mountain pixel colours live in `scripts/data/materials.gd`.
+Interns are drawn in code from tiny pixel frames (`FRAMES` in `interns.gd`). Mountain pixel colours live in `scripts/data/materials.gd`.
 
 Sounds: `dig`, `crumble`, `grab`, `drop`, `thud`, `horn`, `engine`, `cash`, `explosion`, `grenade`, `nuke`, `rumble`, `rifle`, `mg`, `bmg`, `cannon`, `scrape`, `bird`, `buy`, `find`, `deny`, `boss`, `blip`, `tick`, `clear` (all `.wav`; `.ogg` works too if you change the extension check in `sfx.gd`).
 

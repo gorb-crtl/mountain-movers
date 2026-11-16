@@ -5,8 +5,9 @@ extends Node2D
 
 signal sold(amount: float)
 
-const TRUCK_SCALE := 2.0
-const SLOT_SPACING := 112.0
+## One art pixel = one mountain pixel.
+const TRUCK_SCALE := 5.0
+const SLOT_SPACING := 125.0
 const OFFSCREEN := 1700.0
 const DRIVE_SPEED := 220.0
 
@@ -25,7 +26,8 @@ func _process(delta: float) -> void:
 		var tr: Dictionary = line[i]
 		var node: Node2D = tr["node"]
 		var target := spot_x - i * SLOT_SPACING
-		node.position.x = move_toward(node.position.x, target, DRIVE_SPEED * delta)
+		tr["fx"] = move_toward(float(tr.get("fx", node.position.x)), target, DRIVE_SPEED * delta)
+		node.position.x = roundf(float(tr["fx"]) / TRUCK_SCALE) * TRUCK_SCALE
 	var front: Variant = loading_truck()
 	if front and int(front["n"]) >= cap:
 		front["t"] = float(front["t"]) - delta
@@ -36,9 +38,10 @@ func _process(delta: float) -> void:
 		match tr["state"]:
 			"leaving":
 				tr["speed"] = float(tr.get("speed", 0.0)) + 500.0 * delta
-				node.position.x -= float(tr["speed"]) * delta
+				tr["fx"] = float(tr.get("fx", node.position.x)) - float(tr["speed"]) * delta
+				node.position.x = roundf(float(tr["fx"]) / TRUCK_SCALE) * TRUCK_SCALE
 				if effects and randf() < 0.5:
-					effects.dust(Vector2(node.position.x + 90.0, -2.0), 1)
+					effects.dust(Vector2(node.position.x + 105.0, -2.0), 1)
 				if node.position.x < spot_x - OFFSCREEN:
 					tr["state"] = "away"
 					tr["t"] = Game.truck_trip_time()
@@ -53,6 +56,7 @@ func _process(delta: float) -> void:
 					tr["state"] = "line"
 					node.visible = true
 					node.position.x = spot_x - OFFSCREEN
+					tr["fx"] = node.position.x
 					line.append(tr)
 		node.set("load_frac", float(tr["n"]) / float(cap))
 		node.set("label", "%d/%d" % [int(tr["n"]), cap] if tr == front else "")
@@ -89,12 +93,12 @@ func loading_truck() -> Variant:
 
 ## Where interns walk to unload (world x).
 func unload_x() -> float:
-	return spot_x + 64.0 * TRUCK_SCALE * 0.5 + 30.0
+	return spot_x + 22.0 * TRUCK_SCALE + 12.0
 
 
-## Area above the parked truck's bed. Drop or throw rocks here.
+## Area above (and including) the parked truck's bed. Drop or throw rocks here.
 func bed_rect() -> Rect2:
-	return Rect2(spot_x + 26.0, -110.0, 76.0, 92.0)
+	return Rect2(spot_x + 8.0 * TRUCK_SCALE, -11.0 * TRUCK_SCALE - 50.0, 14.0 * TRUCK_SCALE, 50.0 + 5.0 * TRUCK_SCALE)
 
 
 func is_over_bed(p: Vector2) -> bool:
@@ -114,6 +118,10 @@ func deposit(n: int, value: float) -> int:
 	tr["n"] = int(tr["n"]) + k
 	tr["v"] = float(tr["v"]) + value * float(k) / float(n)
 	tr["t"] = 0.6
+	var cols: PackedColorArray = tr.get("cols", PackedColorArray())
+	while cols.size() < 60:
+		cols.append(Color(0.3, 0.29, 0.33).lightened(randf() * 0.25))
+	tr["cols"] = cols
 	Sfx.play("drop", -4.0)
 	(tr["node"] as TruckNode).bump()
 	return k
@@ -211,20 +219,19 @@ class TruckNode extends Node2D:
 	func _draw() -> void:
 		var s := TruckDepot.TRUCK_SCALE
 		var h := texture.get_height() * s
-		var off := Vector2(0, -h + _bump * 2.0)
-		# Load pile peeking out of the bed.
+		var off := Vector2(0, -h - roundf(_bump * 2.0) * s * 0.2)
+		# Load heaped in the bed, built out of mountain-sized pixels.
 		if load_frac > 0.0:
-			var bed_l := 17.0 * s
-			var bed_r := 47.0 * s
-			var top := -h + 5.0 * s
-			var height := clampf(load_frac, 0.0, 1.0) * 22.0
-			var pile := PackedVector2Array([
-				Vector2(bed_l, top), Vector2(bed_l + 8, top - height * 0.7),
-				Vector2((bed_l + bed_r) * 0.5, top - height), Vector2(bed_r - 8, top - height * 0.75),
-				Vector2(bed_r, top)])
-			draw_colored_polygon(pile, Color(0.45, 0.42, 0.42))
+			var cols := 12
+			var max_h := 5.0 * clampf(load_frac, 0.0, 1.0)
+			for cx in cols:
+				var t := (float(cx) + 0.5) / float(cols)
+				var col_h := int(round(max_h * (1.0 - pow(absf(t - 0.5) * 2.0, 2.0) * 0.6)))
+				for cy in col_h:
+					var shade := Color(0.32, 0.30, 0.35).lightened(0.15 * float((cx * 7 + cy * 3) % 3) / 2.0)
+					draw_rect(Rect2(off + Vector2(9 + cx, 1 - cy) * s, Vector2(s, s)), shade)
 		draw_texture_rect(texture, Rect2(off, Vector2(texture.get_width(), texture.get_height()) * s), false)
 		if label != "":
-			var font := ThemeDB.fallback_font
-			draw_string_outline(font, Vector2(30, -h - 32), label, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, 4, Color.BLACK)
-			draw_string(font, Vector2(30, -h - 32), label, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(1, 0.95, 0.6))
+			var font: Font = ThemeBuilder.title_font
+			draw_string_outline(font, Vector2(45, -h - 40), label, HORIZONTAL_ALIGNMENT_LEFT, -1, 14, 5, Color.BLACK)
+			draw_string(font, Vector2(45, -h - 40), label, HORIZONTAL_ALIGNMENT_LEFT, -1, 14, ThemeBuilder.ACCENT)

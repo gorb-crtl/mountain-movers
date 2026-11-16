@@ -8,6 +8,7 @@ var colors := PackedColorArray()
 var finds: Array = []          # [{"name", "value"}] carried fossils/artefacts
 var armed_item := ""           # one-use item waiting for a click
 var _tex: Texture2D = preload("res://assets/sprites/cursor_hand.png")
+var _fist: Texture2D = preload("res://assets/sprites/cursor_fist.png")
 var _item_tex: Dictionary = {}
 
 
@@ -47,25 +48,30 @@ func clear() -> void:
 
 
 func _draw() -> void:
+	# Drawn at the mountain's pixel size, but never smaller than 3 screen pixels
+	# per art pixel so it stays usable when zoomed far out.
 	var z := get_viewport().get_canvas_transform().get_scale().x
+	var px := maxf(Game.CELL, 3.0 / maxf(z, 0.01))
 	var inv := 1.0 / maxf(z, 0.01)
 	if armed_item != "":
 		var t: Texture2D = _item_tex.get(armed_item)
 		if t:
-			var sz := t.get_size() * 2.0 * inv
-			draw_texture_rect(t, Rect2(Vector2(6, 6) * inv, sz), false)
-		draw_arc(Vector2.ZERO, 10.0 * inv, 0, TAU, 20, Color(1, 0.3, 0.2), 2.0 * inv)
+			draw_texture_rect(t, Rect2(Vector2(1, 1) * px, t.get_size() * px), false)
+		# Pixel crosshair.
+		for d in [Vector2(-2, 0), Vector2(2, 0), Vector2(0, -2), Vector2(0, 2)]:
+			draw_rect(Rect2((d - Vector2(0.5, 0.5)) * px, Vector2(px, px)), Color(1, 0.35, 0.25))
 		return
+	var holding := n > 0 or not finds.is_empty()
 	if n > 0:
-		var r := clampf(Game.CELL * 0.55 * sqrt(float(n)), 3.0, Rock.MAX_RADIUS)
-		Rock.draw_blob(self, Vector2(0, 4.0 * inv + r * 0.4), r, colors)
+		Rock.draw_blob(self, Vector2(4, 1) * px, n, colors, px)
 	for i in finds.size():
-		draw_circle(Vector2(10 + i * 6, -6) * inv, 4.0 * inv, Color(1, 0.85, 0.3))
-	draw_texture_rect(_tex, Rect2(Vector2(-4, -2) * inv, _tex.get_size() * inv), false)
-	if n > 0 or not finds.is_empty():
-		var font := ThemeDB.fallback_font
+		draw_rect(Rect2(Vector2(8 + i * 2, -2) * px, Vector2(px, px)), Color(1, 0.85, 0.3))
+	var tex := _fist if holding else _tex
+	draw_texture_rect(tex, Rect2(Vector2(-1, 0) * px, tex.get_size() * px), false)
+	if holding:
+		var font: Font = ThemeBuilder.title_font
 		var txt := "%d/%d" % [n, Game.hand_capacity()]
-		draw_set_transform(Vector2(14, 22) * inv, 0, Vector2(inv, inv))
-		draw_string_outline(font, Vector2.ZERO, txt, HORIZONTAL_ALIGNMENT_LEFT, -1, 13, 3, Color.BLACK)
-		draw_string(font, Vector2.ZERO, txt, HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color.WHITE if room() > 0 else Color(1, 0.5, 0.4))
+		draw_set_transform(Vector2(9, 9) * px, 0, Vector2(inv, inv))
+		draw_string_outline(font, Vector2.ZERO, txt, HORIZONTAL_ALIGNMENT_LEFT, -1, 10, 4, Color.BLACK)
+		draw_string(font, Vector2.ZERO, txt, HORIZONTAL_ALIGNMENT_LEFT, -1, 10, ThemeBuilder.TEXT if room() > 0 else ThemeBuilder.BAD)
 		draw_set_transform(Vector2.ZERO)

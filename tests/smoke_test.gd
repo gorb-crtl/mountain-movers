@@ -52,6 +52,29 @@ func _ready() -> void:
 	await wait(0.6)
 	check(int(tr["n"]) > before_n, "a rock thrown into the bed gets loaded")
 
+	# Letting go of the mouse never drops what you're holding.
+	var c2 := m.random_surface_cell()
+	main._dig(m.cell_to_world(c2))
+	main._dig(m.cell_to_world(m.surface_cell_near(m.cell_to_world(c2).x, 5)))
+	var held: int = main.hand.n
+	main._holding = true
+	main._drag_px = 500.0
+	main._on_left_release()
+	check(held > 0 and main.hand.n == held, "left release keeps the load in hand (%d px)" % main.hand.n)
+	main._drop_hand(Vector2.ZERO)
+	check(main.hand.n == 0, "right-click drop empties the hand")
+
+	# Cave-in: carve a wide tunnel along the ground and the roof should fall.
+	var caves := [0]
+	m.caved_in.connect(func(hv: Dictionary, _c: Vector2) -> void: caves[0] += int(hv["n"]))
+	var mid := m.w / 2
+	m.damage_rect(Rect2i(mid - 18, m.h - 6, 36, 6), INF)
+	var solid_mid := m.solid
+	await wait(0.8)
+	check(caves[0] > 50 and m.solid < solid_mid, "undermining the mountain causes a cave-in (%d px fell)" % caves[0])
+	check(int(Game.stats.get("caveins", 0)) >= 1, "cave-ins are counted")
+	main.rocks.clear_all()
+
 	# Full truck drives off and pays.
 	Engine.time_scale = 6.0
 	depot.deposit(Game.truck_capacity(), 500.0)

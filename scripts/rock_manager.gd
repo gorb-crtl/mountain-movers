@@ -3,7 +3,7 @@ extends Node2D
 ## Spawns, tracks and merges loose rocks. Keeps the count capped so the physics
 ## engine survives a nuke.
 
-const MAX_ROCKS := 170
+const MAX_ROCKS := 220
 const MAX_PIXELS_PER_ROCK := 36
 
 var rocks: Array[Rock] = []

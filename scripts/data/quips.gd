@@ -66,6 +66,14 @@ const UPGRADE: Array = [
 	"New gear! Now dig twice as hard for the same pay.",
 ]
 
+const CAVE_IN: Array = [
+	"Now THAT'S what I call teamwork. Gravity's on the payroll now.",
+	"Did the mountain just fall over? Do that again.",
+	"Undermine it! Like I do to my competitors!",
+	"Ha! Let it come down! I'm not paying for the ceiling.",
+	"That's the spirit. Kick its legs out!",
+]
+
 const CLEAR: Array = [
 	"Huh. It's gone. ...I suppose that's adequate.",
 	"Not bad! I'll mention you in my bonus speech. My bonus.",

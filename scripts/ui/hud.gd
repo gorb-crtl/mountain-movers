@@ -39,6 +39,7 @@ var _hotbar_box: HBoxContainer
 var _approval_big: Label
 var _regrow_btn: Button
 var _stats: Label
+var _crt_check: CheckButton
 var _toasts: VBoxContainer
 var _flash: ColorRect
 var _popup_bg: ColorRect
@@ -68,7 +69,6 @@ func _ready() -> void:
 	_toasts.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_root.add_child(_toasts)
 	boss = Boss.new()
-	boss.position = Vector2(14, 708)
 	_root.add_child(boss)
 	_build_popup()
 	_shown_money = Game.money
@@ -157,6 +157,8 @@ func _layout(animate: bool) -> void:
 	_handle.text = ">" if panel_open else "<"
 	_handle.tooltip_text = ("Hide" if panel_open else "Show") + " the shop (Tab)"
 	var area := play_area()
+	if boss:
+		boss.right_edge = area.end.x
 	_toasts.position = Vector2(area.get_center().x - 210, TOP_H + 14)
 	_hotbar_box.reset_size()
 	_hotbar_box.position = Vector2(area.get_center().x - _hotbar_box.size.x * 0.5 + 60.0, SCREEN.y - _hotbar_box.size.y - 10)
@@ -301,7 +303,16 @@ func _build_side_panel() -> void:
 		Sfx.play("grab"))
 	vol_row.add_child(vol)
 	boss_tab.add_child(vol_row)
-	boss_tab.add_child(_wrap("Left-click the mountain to break off rock; drag it to the truck and let go, or fling it in. Hold to keep digging and to vacuum up loose rocks. Right-click drops. WASD / right-drag to move, wheel to zoom, F to re-centre, Tab hides this panel."))
+	_crt_check = CheckButton.new()
+	_crt_check.text = "CRT TV effect  (F2)"
+	_crt_check.button_pressed = Game.crt
+	_crt_check.tooltip_text = "Scanlines, curved glass and a bit of flicker, like an old TV."
+	_crt_check.toggled.connect(func(on: bool):
+		Game.crt = on
+		Sfx.play("tick")
+		Game.changed.emit())
+	boss_tab.add_child(_crt_check)
+	boss_tab.add_child(_wrap("Left-click the mountain to break off rock; drag it to the truck bed and let go. Hold to keep digging and to vacuum up loose rocks. Only right-click drops what you hold (flick the mouse while right-clicking to throw). Undercut the mountain to trigger cave-ins! WASD / right-drag to move, wheel to zoom, F to re-centre, Tab hides this panel."))
 	_stats = _wrap("")
 	boss_tab.add_child(_stats)
 	var wipe := Button.new()
@@ -575,8 +586,10 @@ func refresh() -> void:
 		(h["count"] as Label).text = str(count) if count > 0 else ""
 		(h["button"] as Button).modulate.a = 1.0 if count > 0 else 0.45
 
+	if _crt_check and _crt_check.button_pressed != Game.crt:
+		_crt_check.set_pressed_no_signal(Game.crt)
 	_approval_big.text = "Approval: * %d" % Game.approval
 	_regrow_btn.text = "Regrow mountain  (+%d)" % Game.bailout_award(frac)
-	_stats.text = "Pixels moved: %s\nClicks: %s\nFinds: %d\nTruckloads: %d\nMountains moved: %d\nTotal earned: $%s" % [
+	_stats.text = "Pixels moved: %s\nClicks: %s\nFinds: %d\nTruckloads: %d\nCave-ins: %d\nMountains moved: %d\nTotal earned: $%s" % [
 		Game.fmt(float(Game.stats["pixels"])), Game.fmt(float(Game.stats["clicks"])),
-		int(Game.stats["finds"]), int(Game.stats.get("trucks", 0)), int(Game.stats["mountains"]), Game.fmt(float(Game.stats["earned"]))]
+		int(Game.stats["finds"]), int(Game.stats.get("trucks", 0)), int(Game.stats.get("caveins", 0)), int(Game.stats["mountains"]), Game.fmt(float(Game.stats["earned"]))]

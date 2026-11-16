@@ -3,14 +3,15 @@ extends Node2D
 ## Hired guns parked on the far (right) side of the mountain. They shoot the
 ## mountain on their own; whatever they knock loose falls as rocks to be hauled.
 
-const SPRITE_SCALE := 2.0
+## One art pixel = one mountain pixel.
+const SPRITE_SCALE := 5.0
 
 ## id -> fire stats. dmg is per shot before Game.gun_mult().
 const UNITS := {
-	"soldier": {"tex": "res://assets/sprites/soldier.png", "rate": 1.2, "dmg": 3.0, "radius": 0.5, "sound": "rifle", "vol": -14.0, "spacing": 16.0, "muzzle": Vector2(-6, -22)},
-	"gunner": {"tex": "res://assets/sprites/gunner.png", "rate": 8.0, "dmg": 1.6, "radius": 0.5, "sound": "mg", "vol": -16.0, "spacing": 18.0, "muzzle": Vector2(-8, -22)},
-	"technical": {"tex": "res://assets/sprites/technical.png", "rate": 3.0, "dmg": 14.0, "radius": 1.3, "sound": "bmg", "vol": -10.0, "spacing": 90.0, "muzzle": Vector2(20, -42)},
-	"tank": {"tex": "res://assets/sprites/tank.png", "rate": 0.35, "dmg": 60.0, "radius": -1.0, "sound": "cannon", "vol": -4.0, "spacing": 96.0, "muzzle": Vector2(0, -34)},
+	"soldier": {"tex": "res://assets/sprites/soldier.png", "rate": 1.2, "dmg": 3.0, "radius": 0.5, "sound": "rifle", "vol": -14.0, "spacing": 30.0, "muzzle": Vector2(0, -22)},
+	"gunner": {"tex": "res://assets/sprites/gunner.png", "rate": 8.0, "dmg": 1.6, "radius": 0.5, "sound": "mg", "vol": -16.0, "spacing": 35.0, "muzzle": Vector2(0, -22)},
+	"technical": {"tex": "res://assets/sprites/technical.png", "rate": 3.0, "dmg": 14.0, "radius": 1.3, "sound": "bmg", "vol": -10.0, "spacing": 95.0, "muzzle": Vector2(30, -42)},
+	"tank": {"tex": "res://assets/sprites/tank.png", "rate": 0.35, "dmg": 60.0, "radius": -1.0, "sound": "cannon", "vol": -4.0, "spacing": 100.0, "muzzle": Vector2(0, -32)},
 }
 
 var mountain: Mountain
@@ -67,9 +68,9 @@ func _rebuild() -> void:
 	var x := camp_x + 40.0
 	for i in Game.run_lvl("bulldozer"):
 		var s := _sprite(_dozer_tex)
-		s.position = Vector2(x + i * 84.0, 0)
+		s.position = Vector2(x + i * 85.0, 0)
 		_dozers.append({"node": s, "state": "push", "t": 0.0, "home": s.position.x + 60.0})
-	x += 60.0 + Game.run_lvl("bulldozer") * 84.0
+	x += 40.0 + Game.run_lvl("bulldozer") * 85.0
 	for id in ["soldier", "gunner", "technical", "tank"]:
 		var def: Dictionary = UNITS[id]
 		var tex: Texture2D = load(def["tex"])
@@ -108,8 +109,8 @@ func _fire(u: Dictionary, def: Dictionary) -> void:
 	if u["type"] == "technical":
 		mult *= Game.diesel_mult()
 	Sfx.play(def["sound"], float(def["vol"]), 0.1, 40)
-	node.position.x += 1.5
-	create_tween().tween_property(node, "position:x", node.position.x - 1.5, 0.08)
+	node.offset.x = 1.0
+	get_tree().create_timer(0.06).timeout.connect(func(): node.offset.x = 0.0)
 	if u["type"] == "tank":
 		_shell(muzzle, hit, hit_pos, float(def["dmg"]) * mult)
 		return
@@ -155,7 +156,8 @@ func _drive_dozer(d: Dictionary, delta: float) -> void:
 			if foot_x == INF:
 				return
 			if node.position.x > foot_x + 2.0:
-				node.position.x -= speed * delta
+				d["fx"] = float(d.get("fx", node.position.x)) - speed * delta
+				node.position.x = roundf(float(d["fx"]) / Game.CELL) * Game.CELL
 			else:
 				d["t"] = float(d["t"]) - delta
 				if float(d["t"]) <= 0.0:
@@ -169,9 +171,9 @@ func _drive_dozer(d: Dictionary, delta: float) -> void:
 						rocks.spawn_harvest(hv, Vector2(node.position.x + 40, -10), 90.0, 3.0)
 						if randf() < 0.3:
 							d["state"] = "back"
-				node.position.x += randf_range(-0.5, 0.5)
 		"back":
-			node.position.x += speed * 1.5 * delta
+			d["fx"] = float(d.get("fx", node.position.x)) + speed * 1.5 * delta
+			node.position.x = roundf(float(d["fx"]) / Game.CELL) * Game.CELL
 			if node.position.x >= float(d["home"]):
 				d["state"] = "push"
 

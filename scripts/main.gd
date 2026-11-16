@@ -4,7 +4,6 @@ extends Node2D
 
 const AUTOSAVE_SECONDS := 15.0
 const HOLD_DIG_RATE := 4.0
-const THROW_DRAG_PX := 24.0
 
 var world: Node2D
 var camera: CameraRig
@@ -56,6 +55,8 @@ func _ready() -> void:
 	world.add_child(mountain)
 	mountain.item_found.connect(_on_item_found)
 	mountain.cleared.connect(_on_cleared)
+	mountain.cave_warning.connect(_on_cave_warning)
+	mountain.caved_in.connect(_on_caved_in)
 
 	depot = TruckDepot.new()
 	world.add_child(depot)
@@ -97,6 +98,7 @@ func _ready() -> void:
 	world.add_child(camera)
 	camera.make_current()
 
+	add_child(CrtOverlay.new())
 	hud = Hud.new()
 	hud.mountain = mountain
 	hud.depot = depot
@@ -176,7 +178,8 @@ func _unhandled_input(event: InputEvent) -> void:
 				if hand.armed_item != "":
 					_arm_item("")
 				else:
-					_drop_hand(Vector2.ZERO)
+					# Right-click drops; flicking the mouse while clicking throws it.
+					_drop_hand(_mouse_vel.limit_length(1100.0) if _mouse_vel.length() > 300.0 else Vector2.ZERO)
 	elif event is InputEventKey and event.pressed and not event.echo:
 		var key := (event as InputEventKey).keycode
 		match key:
@@ -184,6 +187,10 @@ func _unhandled_input(event: InputEvent) -> void:
 				_arm_item(UpgradeDefs.ITEMS[key - KEY_1]["id"])
 			KEY_ESCAPE:
 				_arm_item("")
+			KEY_F2:
+				Game.crt = not Game.crt
+				Sfx.play("tick")
+				Game.changed.emit()
 			KEY_F:
 				camera.frame(_world_focus_rect(), hud.play_area())
 			KEY_F9, KEY_F10, KEY_F11:
@@ -242,10 +249,10 @@ func _on_left_release() -> void:
 	if hand.is_empty():
 		return
 	var p := get_global_mouse_position()
+	# Letting go of the button never drops the load; only the truck bed takes it.
+	# Dropping is right-click only so loads aren't lost by accident.
 	if depot.is_over_bed(p):
 		_deposit_hand()
-	elif _drag_px > THROW_DRAG_PX and not _over_mountain(p):
-		_drop_hand(_mouse_vel.limit_length(1100.0))
 
 
 func _over_mountain(p: Vector2) -> bool:
@@ -432,6 +439,33 @@ func _save() -> void:
 
 
 # ------------------------------------------------------------- events
+
+func _on_cave_warning(at: Vector2, cells: int) -> void:
+	Sfx.play("rumble", -14.0 + minf(cells / 60.0, 8.0), 0.1, 120)
+	add_shake(0.08)
+	effects.dust(at, 3)
+
+
+## Undermined rock gives way: a slab drops as loose rocks worth 50% more.
+func _on_caved_in(harvest: Dictionary, center: Vector2) -> void:
+	var n: int = harvest["n"]
+	var big := n > 250
+	rocks.spawn_harvest(harvest, center, 0.0, 4.0 if n < 600 else 6.0)
+	add_shake(minf(0.18 + n / 500.0, 1.1))
+	Sfx.play("rumble", -2.0 if big else -6.0, 0.1, 60)
+	Sfx.play("crumble", 0.0, 0.15, 30)
+	if big:
+		Sfx.play("explosion", -8.0, 0.1, 60)
+	var pos: PackedVector2Array = harvest["pos"]
+	var step := maxi(1, pos.size() / 18)
+	for k in range(0, pos.size(), step):
+		effects.dust(pos[k], 2)
+	var label := "MASSIVE CAVE-IN!" if big else "CAVE-IN!"
+	effects.pop(center + Vector2(0, -30), label, Color(1, 0.75, 0.35), 16 if big else 13, 1.3)
+	effects.pop(center + Vector2(0, -8), "x1.5 value  (%d px)" % n, ThemeBuilder.MONEY, 10, 1.3)
+	if n > 60 and randf() < 0.5:
+		hud.boss.say(Quips.pick(Quips.CAVE_IN))
+
 
 func _on_item_found(item_name: String, base_value: float, _mat: int, pos: Vector2) -> void:
 	var value := Game.find_value(base_value)
