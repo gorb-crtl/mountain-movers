@@ -35,6 +35,7 @@ The boss wants the mountain gone. You get paid by the truckload.
 | Mouse wheel | Zoom |
 | F | Re-centre on the mountain |
 | Esc | Cancel an item |
+| Tab (or the arrow tab) | Hide / show the shop panel |
 
 - **Dump trucks** are the only income. A truck parks at the loading spot; when it's full it honks, drives off, sells the load and comes back. Ore makes rock worth more, and buried **fossils and artefacts** (Ancient Toaster, Cursed Spork, ...) pop out as glowing finds worth a lot. **Send truck** sends a half-full one.
 - **Crew** tab: stronger hands, bigger gloves, wider fistful, **interns** (stick people who dig and haul rock to the truck on their own), wheelbarrows, coffee, bigger truck beds, faster trucks, more trucks, appraiser.
@@ -75,7 +76,8 @@ scripts/
   effects.gd                Debris, tracers, explosions, smoke
   boss.gd                   The boss and his speech bubble
   sky.gd / background.gd    Placeholder sky and ground
-  ui/hud.gd                 Top bar, tabs, hotbar, popups
+  ui/hud.gd                 Top bar, collapsible shop panel, hotbar, popups
+  ui/theme_builder.gd       Dark UI theme (colours, fonts, styles)
   data/materials.gd         Mountain materials, values, fossil/artefact shapes
   data/upgrades.gd          Upgrades, military, items, perks: names, descriptions, prices
   data/quips.gd             Everything the boss says
@@ -83,6 +85,7 @@ assets/sprites/             Placeholder art
 assets/sounds/              Placeholder sound effects
 tools/gen_placeholder_art.py  Regenerates the placeholder sprites (needs Pillow)
 tools/gen_placeholder_sfx.py  Regenerates the placeholder sounds (standard library only)
+tools/gen_icons.py          Regenerates the upgrade icons (needs Pillow)
 tests/smoke_test.tscn       Headless test: hand, trucks, interns, military, items, all 7 mountains
 ```
 
@@ -101,9 +104,11 @@ Overwrite any file in `assets/sprites/` or `assets/sounds/` with one of the same
 | `cursor_hand.png` | Your hand | 1× |
 | `icon.png` | Window / app icon | — |
 
+Upgrade icons live in `assets/icons/<upgrade id>.png` (16×16 placeholders from `tools/gen_icons.py`; any size works). Fonts are Silkscreen and Pixelify Sans (`assets/fonts/`, SIL Open Font License). UI colours are in `scripts/ui/theme_builder.gd`.
+
 Interns are drawn in code (`interns.gd`, `_draw`) as stick figures. Mountain pixel colours live in `scripts/data/materials.gd`.
 
-Sounds: `dig`, `crumble`, `grab`, `drop`, `thud`, `horn`, `engine`, `cash`, `explosion`, `grenade`, `nuke`, `rumble`, `rifle`, `mg`, `bmg`, `cannon`, `scrape`, `bird`, `buy`, `find`, `deny`, `boss`, `clear` (all `.wav`; `.ogg` works too if you change the extension check in `sfx.gd`).
+Sounds: `dig`, `crumble`, `grab`, `drop`, `thud`, `horn`, `engine`, `cash`, `explosion`, `grenade`, `nuke`, `rumble`, `rifle`, `mg`, `bmg`, `cannon`, `scrape`, `bird`, `buy`, `find`, `deny`, `boss`, `blip`, `tick`, `clear` (all `.wav`; `.ogg` works too if you change the extension check in `sfx.gd`).
 
 ## Balancing
 

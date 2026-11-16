@@ -1,16 +1,20 @@
 class_name Boss
 extends Node2D
-## The boss, standing in the bottom-left corner of the screen, pointing at the
-## mountain and having opinions. Lives in the HUD layer, so it ignores the camera.
+## The boss, standing in the bottom-left corner of the screen and having opinions.
+## Lives in the HUD layer, so it ignores the camera. What he says is typed out
+## next to him, letter by letter, with little mumble blips.
 
 const SCALE := 4.0
+const CHARS_PER_SEC := 45.0
 
 var _sprite: Sprite2D
-var _bubble: PanelContainer
 var _label: Label
+var _full := ""
+var _shown := 0.0
 var _hide_at := 0.0
 var _idle_at := 0.0
 var _time := 0.0
+var _last_blip := 0
 
 
 func _ready() -> void:
@@ -21,34 +25,32 @@ func _ready() -> void:
 	_sprite.position = Vector2(0, -_sprite.texture.get_height() * SCALE)
 	add_child(_sprite)
 
-	_bubble = PanelContainer.new()
-	var sb := StyleBoxFlat.new()
-	sb.bg_color = Color(1, 1, 1)
-	sb.border_color = Color(0.1, 0.1, 0.1)
-	sb.set_border_width_all(3)
-	sb.set_content_margin_all(8)
-	_bubble.add_theme_stylebox_override("panel", sb)
-	_bubble.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_label = Label.new()
 	_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_label.custom_minimum_size = Vector2(190, 0)
-	_label.add_theme_color_override("font_color", Color(0.1, 0.1, 0.1))
-	_label.add_theme_font_size_override("font_size", 14)
-	_bubble.add_child(_label)
-	add_child(_bubble)
-	_bubble.visible = false
+	_label.custom_minimum_size = Vector2(360, 0)
+	_label.size = Vector2(360, 0)
+	_label.vertical_alignment = VERTICAL_ALIGNMENT_BOTTOM
+	_label.add_theme_font_override("font", preload("res://assets/fonts/PixelifySans.ttf"))
+	_label.add_theme_font_size_override("font_size", 19)
+	_label.add_theme_color_override("font_color", Color(0.96, 0.9, 0.78))
+	_label.add_theme_color_override("font_outline_color", Color(0.02, 0.02, 0.03))
+	_label.add_theme_constant_override("outline_size", 6)
+	_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_label.position = Vector2(_sprite.texture.get_width() * SCALE + 14, -_sprite.texture.get_height() * SCALE)
+	add_child(_label)
 	_idle_at = randf_range(20, 35)
 	Game.boss_says.connect(say)
 
 
 func say(text: String, duration := 5.0) -> void:
-	_label.text = text
-	_bubble.visible = true
-	if duration < 900.0:
-		Sfx.play("boss", -8.0, 0.05, 0)
-	_bubble.reset_size()
-	_bubble.position = Vector2(4, -_sprite.texture.get_height() * SCALE - 16 - _bubble.size.y)
-	_hide_at = _time + duration
+	_full = "“" + text + "”"
+	_shown = 0.0
+	_last_blip = 0
+	_label.text = ""
+	_label.visible_characters = 0
+	_label.text = _full
+	_label.modulate.a = 1.0
+	_hide_at = _time + duration + _full.length() / CHARS_PER_SEC
 	var tw := create_tween()
 	_sprite.scale = Vector2(SCALE * 1.08, SCALE * 0.92)
 	tw.tween_property(_sprite, "scale", Vector2(SCALE, SCALE), 0.2)
@@ -56,8 +58,21 @@ func say(text: String, duration := 5.0) -> void:
 
 func _process(delta: float) -> void:
 	_time += delta
-	if _bubble.visible and _time > _hide_at:
-		_bubble.visible = false
+	if _full != "" and _shown < _full.length():
+		_shown += delta * CHARS_PER_SEC
+		var n := mini(int(_shown), _full.length())
+		_label.visible_characters = n
+		# A mumble blip every few letters.
+		if n - _last_blip >= 3 and _full[n - 1] != " ":
+			_last_blip = n
+			Sfx.play("blip", -12.0, 0.3, 35)
+	# Keep the text's bottom aligned with the boss's head.
+	_label.position.y = -_sprite.texture.get_height() * SCALE - 6.0 - _label.size.y + 40.0
+	if _full != "" and _time > _hide_at:
+		_label.modulate.a = maxf(0.0, _label.modulate.a - delta * 1.5)
+		if _label.modulate.a <= 0.0:
+			_full = ""
+			_label.text = ""
 	if _time > _idle_at:
 		_idle_at = _time + randf_range(25, 45)
 		say(Quips.pick(Quips.IDLE))

@@ -5,7 +5,6 @@ extends Node2D
 const AUTOSAVE_SECONDS := 15.0
 const HOLD_DIG_RATE := 4.0
 const THROW_DRAG_PX := 24.0
-const MAX_FLOATERS := 40
 
 var world: Node2D
 var camera: CameraRig
@@ -29,6 +28,8 @@ var _last_mouse := Vector2.ZERO
 var _shake := 0.0
 var _autosave := AUTOSAVE_SECONDS
 var _floaters := 0
+var _glint_t := 0.0
+const VACUUM_RADIUS := 34.0
 
 
 func _ready() -> void:
@@ -87,6 +88,8 @@ func _ready() -> void:
 	world.add_child(abilities)
 
 	world.add_child(effects)
+	Rock.effects = effects
+	depot.effects = effects
 	hand = Hand.new()
 	world.add_child(hand)
 
@@ -113,7 +116,7 @@ func _ready() -> void:
 		_layout_world()
 		rocks.deserialize(blob.get("rocks", []))
 		depot.deserialize(blob.get("trucks", []))
-	camera.frame(_world_focus_rect(), Hud.PLAY_AREA)
+	camera.frame(_world_focus_rect(), hud.play_area())
 
 	if Game.won:
 		_show_victory()
@@ -182,7 +185,7 @@ func _unhandled_input(event: InputEvent) -> void:
 			KEY_ESCAPE:
 				_arm_item("")
 			KEY_F:
-				camera.frame(_world_focus_rect(), Hud.PLAY_AREA)
+				camera.frame(_world_focus_rect(), hud.play_area())
 			KEY_F9, KEY_F10, KEY_F11:
 				if OS.is_debug_build():
 					_debug_key(key)
@@ -219,6 +222,7 @@ func _on_left_press(screen_pos: Vector2) -> void:
 		_arm_item("")
 		return
 	Game.stats["clicks"] = int(Game.stats["clicks"]) + 1
+	effects.ring(get_global_mouse_position(), 14.0 / camera.zoom.x)
 	_holding = true
 	_press_screen = screen_pos
 	_drag_px = 0.0
@@ -265,6 +269,7 @@ func _grab_rock_at(p: Vector2) -> bool:
 	if r.pixels <= 0:
 		rocks.remove(r)
 	Sfx.play("grab", -4.0)
+	effects.pop(p + Vector2(0, -8), "+%d" % int(got["n"]), Color(0.9, 0.9, 0.85), 10, 0.6)
 	return true
 
 
@@ -280,8 +285,11 @@ func _dig(p: Vector2) -> void:
 		return
 	Sfx.play("crumble", -10.0, 0.1, 80)
 	var cols: PackedColorArray = hv["colors"]
-	for i in mini(n, 6):
-		effects.debris(p, cols[i], Game.CELL * 0.6, 0.6)
+	var positions: PackedVector2Array = hv["pos"]
+	for i in mini(n, 12):
+		effects.debris(positions[i], cols[i], Game.CELL * 0.7, 0.7)
+	add_shake(0.04)
+	effects.pop(p + Vector2(0, -10), "+%d" % n, Color(0.9, 0.9, 0.85), 10, 0.6)
 	var take := mini(hand.room(), n)
 	var value: float = hv["value"]
 	if take > 0:
@@ -293,8 +301,10 @@ func _dig(p: Vector2) -> void:
 
 
 func _hand_full_hint() -> void:
-	if _floaters < 3:
-		_float_text(get_global_mouse_position() + Vector2(10, -20), "Hand full! Take it to the truck.", Color(1, 0.7, 0.5), 13)
+	if _floaters <= 0:
+		_floaters = 1
+		get_tree().create_timer(0.8).timeout.connect(func(): _floaters = 0)
+		effects.pop(get_global_mouse_position() + Vector2(0, -20), "HAND FULL", ThemeBuilder.BAD, 11, 0.9)
 
 
 func _deposit_hand() -> void:
@@ -308,6 +318,8 @@ func _deposit_hand() -> void:
 		var k := depot.deposit(hand.n, hand.value)
 		if k > 0:
 			any = true
+			effects.pop(depot.bed_rect().get_center() + Vector2(0, -20), "+%d" % k, ThemeBuilder.ACCENT, 14, 0.8)
+			effects.dust(Vector2(depot.bed_rect().get_center().x, -40), 6)
 			var frac := float(k) / float(hand.n)
 			hand.value *= (1.0 - frac)
 			hand.n -= k
@@ -316,7 +328,7 @@ func _deposit_hand() -> void:
 				hand.clear()
 	if not any:
 		Sfx.play("deny")
-		_float_text(get_global_mouse_position() + Vector2(10, -20), "Truck's full or away. Hang on!", Color(1, 0.7, 0.5), 13)
+		effects.pop(get_global_mouse_position() + Vector2(0, -20), "TRUCK FULL OR AWAY", ThemeBuilder.BAD, 11, 1.0)
 
 
 ## Drops (or throws) whatever is in the hand as physics rocks.
@@ -350,11 +362,20 @@ func _process(delta: float) -> void:
 			_drag_px += (mouse - _press_screen).length()
 			_press_screen = mouse
 			# Keep digging / scooping while the button is held.
+			_vacuum(world_mouse, delta)
 			_hold_accum += HOLD_DIG_RATE * delta
 			if _hold_accum >= 1.0:
 				_hold_accum -= 1.0
-				if not _grab_rock_at(world_mouse) and _over_mountain(world_mouse):
+				if _over_mountain(world_mouse):
 					_dig(world_mouse)
+
+	_glint_t -= delta
+	while _glint_t <= 0.0:
+		_glint_t += 0.04
+		var oi := mountain.random_ore_cell()
+		if oi >= 0:
+			var col: Color = Materials.DATA[mountain.mat[oi]]["color"]
+			effects.sparkle(mountain.cell_to_world(Vector2i(oi % mountain.w, oi / mountain.w)), col.lightened(0.5))
 
 	if _shake > 0.0:
 		_shake = maxf(0.0, _shake - delta)
@@ -371,6 +392,26 @@ func _process(delta: float) -> void:
 
 func _physics_process(_delta: float) -> void:
 	depot.absorb_rocks(rocks)
+
+
+## While the button is held, loose rocks near the hand fly into it.
+func _vacuum(at: Vector2, _delta: float) -> void:
+	var radius := VACUUM_RADIUS / camera.zoom.x
+	for rv in rocks.rocks.duplicate():
+		if not is_instance_valid(rv):
+			continue
+		var r: Rock = rv
+		var d := r.position.distance_to(at)
+		if d > radius + r.radius:
+			continue
+		if r.find_name == "" and hand.room() <= 0:
+			_hand_full_hint()
+			return
+		if d < r.radius + 6.0 / camera.zoom.x:
+			_grab_rock_at(r.position)
+		else:
+			r.sleeping = false
+			r.linear_velocity = (at - r.position).normalized() * 520.0
 
 
 func add_shake(amount: float) -> void:
@@ -396,7 +437,8 @@ func _on_item_found(item_name: String, base_value: float, _mat: int, pos: Vector
 	var value := Game.find_value(base_value)
 	Game.stats["finds"] = int(Game.stats["finds"]) + 1
 	rocks.spawn(1, value, PackedColorArray([Color(1, 0.85, 0.3)]), pos, Vector2(randf_range(-30, 30), -160), item_name)
-	_float_text(pos + Vector2(-30, -30), "Found: %s! (worth $%s)" % [item_name, Game.fmt(value * Game.sell_mult())], Color(1, 0.75, 1), 16)
+	effects.pop(pos + Vector2(0, -24), item_name.to_upper() + "!", Color(1, 0.8, 1), 13, 2.0)
+	effects.ring(pos, 30.0, Color(1, 0.85, 0.4), 0.5)
 	Sfx.play("find")
 	if randf() < 0.5:
 		Game.say(Quips.pick(Quips.ITEM), 3.5)
@@ -404,7 +446,9 @@ func _on_item_found(item_name: String, base_value: float, _mat: int, pos: Vector
 
 func _on_truck_sold(amount: float) -> void:
 	Sfx.play("cash", -2.0, 0.02, 0)
-	hud.toast("Truck sold its load: +$%s" % Game.fmt(amount))
+	var at := Vector2(depot.spot_x - 40.0, -60.0)
+	effects.coins(at, 24)
+	effects.pop(at + Vector2(0, -30), "+$" + Game.fmt(amount), ThemeBuilder.MONEY, 20, 1.6)
 	if randf() < 0.15:
 		Game.say(Quips.pick(Quips.TRUCK), 3.0)
 
@@ -428,7 +472,7 @@ func _advance() -> void:
 		_show_victory()
 		return
 	_new_mountain()
-	camera.frame(_world_focus_rect(), Hud.PLAY_AREA)
+	camera.frame(_world_focus_rect(), hud.play_area())
 	_save()
 	Game.say(Quips.pick(Quips.NEW_MOUNTAIN))
 
@@ -436,7 +480,7 @@ func _advance() -> void:
 func _on_regrow() -> void:
 	Game.bail_out(mountain.moved_fraction())
 	_new_mountain()
-	camera.frame(_world_focus_rect(), Hud.PLAY_AREA)
+	camera.frame(_world_focus_rect(), hud.play_area())
 	_save()
 	Game.say(Quips.pick(Quips.BAILOUT))
 
@@ -452,27 +496,3 @@ func _show_victory() -> void:
 		"All seven mountains are gone. The horizon is flat. For the first time in recorded history, the boss is happy.\n\nPixels moved: %s\nTruckloads: %d\nFinds: %d" % [
 			Game.fmt(float(Game.stats["pixels"])), int(Game.stats.get("trucks", 0)), int(Game.stats["finds"])],
 		[["Start over", _on_wipe], ["Admire the view", func(): pass]])
-
-
-func _float_text(pos: Vector2, text: String, color: Color, size := 14) -> void:
-	if _floaters >= MAX_FLOATERS:
-		return
-	_floaters += 1
-	var l := Label.new()
-	l.text = text
-	l.add_theme_font_size_override("font_size", size)
-	l.add_theme_color_override("font_color", color)
-	l.add_theme_color_override("font_outline_color", Color.BLACK)
-	l.add_theme_constant_override("outline_size", 4)
-	l.position = pos
-	l.scale = Vector2.ONE / camera.zoom.x
-	l.z_index = 60
-	l.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	world.add_child(l)
-	var tw := l.create_tween()
-	tw.set_parallel(true)
-	tw.tween_property(l, "position:y", l.position.y - 50.0 / camera.zoom.x, 1.2)
-	tw.tween_property(l, "modulate:a", 0.0, 1.2).set_delay(0.5)
-	tw.chain().tween_callback(func():
-		_floaters -= 1
-		l.queue_free())

@@ -13,12 +13,12 @@ enum { AIR, DIRT, STONE, HARD_ROCK, COPPER, IRON, GOLD, GEM, FOSSIL, ARTEFACT }
 #               pixel of it to collect the whole find
 const DATA: Array = [
 	{"name": "Air", "hp": 0.0, "value": 0.0, "kind": "air", "color": Color(0, 0, 0, 0)},
-	{"name": "Dirt", "hp": 1.0, "value": 0.5, "kind": "rubble", "color": Color(0.55, 0.37, 0.24)},
-	{"name": "Stone", "hp": 3.0, "value": 1.0, "kind": "rubble", "color": Color(0.49, 0.50, 0.53)},
-	{"name": "Hard Rock", "hp": 8.0, "value": 2.0, "kind": "rubble", "color": Color(0.31, 0.31, 0.36)},
-	{"name": "Copper Ore", "hp": 4.0, "value": 12.0, "kind": "ore", "color": Color(0.85, 0.51, 0.29)},
-	{"name": "Iron Ore", "hp": 6.0, "value": 30.0, "kind": "ore", "color": Color(0.80, 0.70, 0.62)},
-	{"name": "Gold Ore", "hp": 10.0, "value": 110.0, "kind": "ore", "color": Color(1.0, 0.82, 0.25)},
+	{"name": "Dirt", "hp": 1.0, "value": 0.5, "kind": "rubble", "color": Color(0.33, 0.25, 0.22)},
+	{"name": "Stone", "hp": 3.0, "value": 1.0, "kind": "rubble", "color": Color(0.30, 0.29, 0.33)},
+	{"name": "Hard Rock", "hp": 8.0, "value": 2.0, "kind": "rubble", "color": Color(0.19, 0.18, 0.23)},
+	{"name": "Copper Ore", "hp": 4.0, "value": 12.0, "kind": "ore", "color": Color(0.85, 0.48, 0.25)},
+	{"name": "Iron Ore", "hp": 6.0, "value": 30.0, "kind": "ore", "color": Color(0.72, 0.66, 0.62)},
+	{"name": "Gold Ore", "hp": 10.0, "value": 110.0, "kind": "ore", "color": Color(1.0, 0.78, 0.25)},
 	{"name": "Gem", "hp": 14.0, "value": 450.0, "kind": "ore", "color": Color(0.31, 0.94, 0.88)},
 	{"name": "Fossil", "hp": 3.0, "value": 0.0, "kind": "item", "color": Color(0.94, 0.90, 0.78)},
 	{"name": "Artefact", "hp": 5.0, "value": 0.0, "kind": "item", "color": Color(0.78, 0.42, 0.98)},

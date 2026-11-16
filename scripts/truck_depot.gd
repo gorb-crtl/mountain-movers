@@ -12,6 +12,7 @@ const DRIVE_SPEED := 220.0
 
 ## World x of the parked truck's left edge (set by main).
 var spot_x := -220.0
+var effects: Effects
 var trucks: Array = []     # [{"node", "state", "n", "v", "t", "finds"}]
 var line: Array = []       # trucks waiting/loading, front first
 var _tex: Texture2D = preload("res://assets/sprites/truck.png")
@@ -36,6 +37,8 @@ func _process(delta: float) -> void:
 			"leaving":
 				tr["speed"] = float(tr.get("speed", 0.0)) + 500.0 * delta
 				node.position.x -= float(tr["speed"]) * delta
+				if effects and randf() < 0.5:
+					effects.dust(Vector2(node.position.x + 90.0, -2.0), 1)
 				if node.position.x < spot_x - OFFSCREEN:
 					tr["state"] = "away"
 					tr["t"] = Game.truck_trip_time()

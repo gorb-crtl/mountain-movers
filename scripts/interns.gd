@@ -174,7 +174,7 @@ func reset() -> void:
 
 
 func _draw() -> void:
-	var line_c := Color(0.08, 0.08, 0.08)
+	var line_c := Color(0.88, 0.85, 0.78)
 	for it in _crew:
 		var x: float = it["x"]
 		var base := Vector2(x, _ground_y(x))
@@ -190,10 +190,9 @@ func _draw() -> void:
 		draw_line(hip, base + Vector2(-swing, 0), line_c, 1.5)
 		# Body and head.
 		draw_line(hip, neck, line_c, 1.5)
-		draw_circle(head, 2.6, Color(0.98, 0.92, 0.8))
-		draw_arc(head, 2.6, 0, TAU, 10, line_c, 1.0)
+		draw_circle(head, 2.6, line_c)
 		# Hard hat.
-		draw_rect(Rect2(head + Vector2(-3.2, -3.4), Vector2(6.4, 2.0)), Color(1, 0.8, 0.1))
+		draw_rect(Rect2(head + Vector2(-3.2, -3.4), Vector2(6.4, 2.0)), Color(0.95, 0.7, 0.25))
 		var shoulder := neck + Vector2(0, 1)
 		if int(it["n"]) > 0:
 			# Arms up, carrying the load overhead.

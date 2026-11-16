@@ -125,4 +125,8 @@ if __name__ == "__main__":
         f = random.choice([180, 220, 260, 200])
         blips += tone(lambda t, f=f: f, 0.05, square, 1) + silence(0.02)
     write("boss", lowpass(blips, 0.4))
+    # Single mumble blip for typed-out boss text.
+    write("blip", lowpass(tone(lambda t: 210, 0.045, square, 1.5), 0.45))
+    # Soft UI tick (hover / open menu).
+    write("tick", tone(lambda t: 1200, 0.02, square, 2))
     write("clear", concat(*[tone(lambda t, f=f: f, 0.12, square, 1) for f in (523, 659, 784, 1047)], tone(lambda t: 1047, 0.4, square, 2)))

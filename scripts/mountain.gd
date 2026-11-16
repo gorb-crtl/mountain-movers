@@ -23,6 +23,8 @@ var items: Dictionary = {}          # item id -> {"name", "value", "left"}
 var initial_solid := 0
 var solid := 0
 var top := PackedInt32Array()       # per column: y of the top-most solid pixel (h if none)
+var ore_cells := PackedInt32Array()  # where the shiny stuff is (for glints)
+var _flashes: Dictionary = {}         # cell -> seconds left of hit flash
 var _harvesting := false
 var _h_n := 0
 var _h_value := 0.0
@@ -45,7 +47,17 @@ func _init() -> void:
 	add_child(_sprite)
 
 
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
+	if not _flashes.is_empty():
+		for i in _flashes.keys():
+			var t: float = _flashes[i] - delta
+			if t <= 0.0:
+				_flashes.erase(i)
+				if mat[i] != Materials.AIR:
+					_image.set_pixel(i % w, i / w, _cell_color(i))
+					_dirty = true
+			else:
+				_flashes[i] = t
 	if _dirty and _texture:
 		_texture.update(_image)
 		_dirty = false
@@ -178,6 +190,11 @@ func _rebuild() -> void:
 	top.resize(w)
 	for x in w:
 		_rescan_top(x, 0)
+	ore_cells = PackedInt32Array()
+	for i in n:
+		if mat[i] >= Materials.COPPER:
+			ore_cells.append(i)
+	_flashes.clear()
 	initial_solid = maxi(initial_solid, solid) if initial_solid > 0 else solid
 	_cleared = false
 	_texture = ImageTexture.create_from_image(_image)
@@ -228,6 +245,11 @@ func _base_color(i: int) -> Color:
 
 func _cell_color(i: int) -> Color:
 	var c := _base_color(i)
+	# Rim light on exposed top edges makes the silhouette pop on a dark background.
+	if i < w or mat[i - w] == Materials.AIR:
+		c = c.lightened(0.28)
+	elif i >= 2 * w and mat[i - 2 * w] == Materials.AIR:
+		c = c.lightened(0.1)
 	var dmg := 1.0 - hp[i] / _max_hp(mat[i])
 	if dmg > 0.0:
 		c = c.darkened(dmg * 0.55)
@@ -311,7 +333,9 @@ func _damage(i: int, amount: float) -> bool:
 		return false
 	hp[i] -= amount
 	if hp[i] > 0.0:
-		_image.set_pixel(i % w, i / w, _cell_color(i))
+		# Hit flash: the pixel blinks bright, then settles to its cracked colour.
+		_image.set_pixel(i % w, i / w, _cell_color(i).lerp(Color(1, 0.95, 0.85), 0.75))
+		_flashes[i] = 0.07
 		_dirty = true
 		return false
 	_destroy(i)
@@ -330,6 +354,10 @@ func _destroy(i: int) -> void:
 	_dirty = true
 	if c.y == top[c.x]:
 		_rescan_top(c.x, c.y)
+	_flashes.erase(i)
+	for below in [i + w, i + 2 * w]:
+		if below < w * h and mat[below] != Materials.AIR and not _flashes.has(below):
+			_image.set_pixel(below % w, below / w, _cell_color(below))
 	var wp := cell_to_world(c)
 	if _harvesting:
 		var pv := Game.pixel_value(m)
@@ -357,6 +385,14 @@ func _rescan_top(x: int, from_y: int) -> void:
 	while y < h and mat[y * w + x] == Materials.AIR:
 		y += 1
 	top[x] = y
+
+
+## A random still-buried ore/find pixel (for glints), or -1.
+func random_ore_cell() -> int:
+	if ore_cells.is_empty():
+		return -1
+	var i := ore_cells[_rng.randi() % ore_cells.size()]
+	return i if mat[i] >= Materials.COPPER else -1
 
 
 func _finish_clear() -> void:

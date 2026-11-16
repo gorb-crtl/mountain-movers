@@ -14,6 +14,10 @@ var _size: PackedFloat32Array = []
 var _gravity: PackedFloat32Array = []
 var _tracers: Array = []   # [from, to, life, color]
 var _flashes: Array = []   # [pos, radius, life, max_life, color]
+var _rings: Array = []     # [pos, radius, life, max_life, color]
+var _sparkles: Array = []  # [pos, life, color]
+var _pops: Array = []      # [pos, text, color, life, max_life, size]
+var _font: Font = preload("res://assets/fonts/Silkscreen-Regular.ttf")
 
 
 func debris(at: Vector2, color: Color, size: float, power := 1.0) -> void:
@@ -30,6 +34,36 @@ func tracer(from: Vector2, to: Vector2, color := Color(1, 0.9, 0.5)) -> void:
 
 func flash(at: Vector2, radius: float, color := Color(1, 0.85, 0.4), life := 0.25) -> void:
 	_flashes.append([at, radius, life, life, color])
+
+
+## Expanding thin circle (clicks, landings).
+func ring(at: Vector2, radius: float, color := Color(1, 0.9, 0.7, 0.8), life := 0.25) -> void:
+	_rings.append([at, radius, life, life, color])
+
+
+## Little four-point glint.
+func sparkle(at: Vector2, color: Color) -> void:
+	if _sparkles.size() < 60:
+		_sparkles.append([at, 0.5, color])
+
+
+## Floating text that stays the same size on screen whatever the zoom.
+func pop(at: Vector2, text: String, color := Color.WHITE, size := 12, life := 0.9) -> void:
+	if _pops.size() > 40:
+		_pops.pop_front()
+	_pops.append([at + Vector2(randf_range(-4, 4), 0), text, color, life, life, size])
+
+
+## Gold coins bursting out (truck sold its load).
+func coins(at: Vector2, count: int) -> void:
+	for i in count:
+		var c := Color(1, 0.82, 0.3) if i % 3 else Color(1, 0.95, 0.6)
+		_add(at, Vector2(randf_range(-160, 160), randf_range(-420, -180)), randf_range(0.8, 1.4), c, randf_range(3, 5), GRAVITY)
+
+
+func dust(at: Vector2, amount := 4) -> void:
+	for i in amount:
+		_add(at + Vector2(randf_range(-4, 4), -1), Vector2(randf_range(-50, 50), randf_range(-30, -5)), randf_range(0.3, 0.6), Color(0.5, 0.45, 0.45, 0.5), randf_range(2, 4), 40.0)
 
 
 func explosion(at: Vector2, radius: float) -> void:
@@ -73,7 +107,21 @@ func _process(delta: float) -> void:
 	for f in _flashes:
 		f[2] -= delta
 	_flashes = _flashes.filter(func(f): return f[2] > 0.0)
+	for r in _rings:
+		r[2] -= delta
+	_rings = _rings.filter(func(r): return r[2] > 0.0)
+	for sp in _sparkles:
+		sp[1] -= delta
+	_sparkles = _sparkles.filter(func(sp): return sp[1] > 0.0)
+	for p in _pops:
+		p[3] -= delta
+		p[0] = (p[0] as Vector2) + Vector2(0, -40.0 * delta / _zoom())
+	_pops = _pops.filter(func(p): return p[3] > 0.0)
 	queue_redraw()
+
+
+func _zoom() -> float:
+	return maxf(get_viewport().get_canvas_transform().get_scale().x, 0.01)
 
 
 func _remove(i: int) -> void:
@@ -107,3 +155,28 @@ func _draw() -> void:
 		draw_rect(Rect2(_pos[i] - Vector2(s, s) * 0.5, Vector2(s, s)), c)
 	for t in _tracers:
 		draw_line(t[0], t[1], t[3], 1.5)
+	var inv := 1.0 / _zoom()
+	for r in _rings:
+		var t: float = 1.0 - r[2] / r[3]
+		var c: Color = r[4]
+		c.a *= 1.0 - t
+		draw_arc(r[0], (r[1] as float) * (0.4 + 0.8 * t), 0, TAU, 24, c, 1.5 * inv)
+	for sp in _sparkles:
+		var t: float = sp[1] / 0.5
+		var c: Color = sp[2]
+		c.a = sin(t * PI)
+		var l := (1.0 + 3.0 * sin(t * PI)) * inv * 1.5
+		var p: Vector2 = sp[0]
+		draw_line(p - Vector2(l, 0), p + Vector2(l, 0), c, inv * 1.2)
+		draw_line(p - Vector2(0, l), p + Vector2(0, l), c, inv * 1.2)
+	for p in _pops:
+		var t: float = p[3] / p[4]
+		var c: Color = p[2]
+		c.a = clampf(t * 2.0, 0.0, 1.0)
+		var punch := 1.0 + 0.5 * maxf(0.0, (t - 0.8) * 5.0)
+		draw_set_transform(p[0], 0, Vector2(inv, inv) * punch)
+		var size: int = p[5]
+		var w := _font.get_string_size(p[1], HORIZONTAL_ALIGNMENT_LEFT, -1, size).x
+		draw_string_outline(_font, Vector2(-w * 0.5, 0), p[1], HORIZONTAL_ALIGNMENT_LEFT, -1, size, 4, Color(0, 0, 0, c.a))
+		draw_string(_font, Vector2(-w * 0.5, 0), p[1], HORIZONTAL_ALIGNMENT_LEFT, -1, size, c)
+	draw_set_transform(Vector2.ZERO)

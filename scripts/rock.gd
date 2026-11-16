@@ -13,6 +13,10 @@ var find_name := ""
 var radius := 3.0
 var claimed_by: Variant = null   # an intern heading for it
 var _shape: CircleShape2D
+var _landed_at := -10.0
+
+## Shared effects node, for landing dust (set by main).
+static var effects: Effects
 
 
 func _init() -> void:
@@ -24,10 +28,24 @@ func _init() -> void:
 	physics_material_override = PhysicsMaterial.new()
 	physics_material_override.friction = 0.9
 	physics_material_override.bounce = 0.15
+	contact_monitor = true
+	max_contacts_reported = 1
+	body_entered.connect(_on_body_entered)
 	var cs := CollisionShape2D.new()
 	_shape = CircleShape2D.new()
 	cs.shape = _shape
 	add_child(cs)
+
+
+func _on_body_entered(_body: Node) -> void:
+	var now := Time.get_ticks_msec() / 1000.0
+	var speed := linear_velocity.length()
+	if speed < 140.0 or now - _landed_at < 0.3:
+		return
+	_landed_at = now
+	Sfx.play("thud", clampf(-26.0 + speed * 0.012 + pixels * 0.2, -26.0, -8.0), 0.2, 25)
+	if effects:
+		effects.dust(position + Vector2(0, radius), 2 + mini(pixels / 4, 6))
 
 
 func setup(n: int, v: float, cols: PackedColorArray, p_find_name := "") -> void:
